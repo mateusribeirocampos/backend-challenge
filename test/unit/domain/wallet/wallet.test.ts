@@ -4,8 +4,10 @@ import { WagerTransactionKind } from '../../../../src/domain/wager/wager-transac
 import { WagerTransactionStatus } from '../../../../src/domain/wager/wager-transaction-status.js';
 import { INTERNAL_PROVIDER_ID } from '../../../../src/domain/wager/wager-transaction.js';
 import {
+  BalanceLimitExceededError,
   InsufficientFundsError,
   InvalidWalletError,
+  MAX_BALANCE_AMOUNT,
   type OpenWalletProps,
   Wallet,
 } from '../../../../src/domain/wallet/wallet.js';
@@ -136,6 +138,36 @@ describe('Wallet debit and credit', () => {
     expect(() => wallet.canDebit(usd('1.00'))).toThrow(CurrencyMismatchError);
     expect(wallet.balance.amount).toBe('100.00');
     expect(wallet.version).toBe(1);
+  });
+});
+
+describe('balance limit: the largest value numeric(20,2) stores', () => {
+  test('MAX_BALANCE_AMOUNT is the same 18 integer digits bound Money.from accepts', () => {
+    expect(MAX_BALANCE_AMOUNT).toBe('999999999999999999.99');
+    expect(brl(MAX_BALANCE_AMOUNT).amount).toBe(MAX_BALANCE_AMOUNT);
+  });
+
+  test('canCredit is true up to the limit exactly and false one cent above', () => {
+    const wallet = walletWith(brl('999999999999999990.00'));
+
+    expect(wallet.canCredit(brl('9.99'))).toBe(true);
+    expect(wallet.canCredit(brl('10.00'))).toBe(false);
+  });
+
+  test('credit above the limit throws and leaves the wallet as it was (last barrier, like debit)', () => {
+    const wallet = walletWith(brl('999999999999999990.00'));
+
+    expect(() => wallet.credit(movement(brl('10.00')))).toThrow(BalanceLimitExceededError);
+    expect(wallet.balance.amount).toBe('999999999999999990.00');
+    expect(wallet.version).toBe(1);
+  });
+
+  test('a credit that lands exactly on the limit is fine', () => {
+    const wallet = walletWith(brl('999999999999999990.00'));
+
+    wallet.credit(movement(brl('9.99')));
+
+    expect(wallet.balance.amount).toBe(MAX_BALANCE_AMOUNT);
   });
 });
 

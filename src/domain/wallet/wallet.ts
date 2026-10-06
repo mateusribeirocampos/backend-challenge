@@ -6,6 +6,13 @@ import { LedgerDirection, WalletLedgerEntry } from './wallet-ledger-entry.js';
 /** Version of a wallet right after it is opened (spec 6.2). */
 export const INITIAL_WALLET_VERSION = 1;
 
+/**
+ * Largest balance a wallet can hold: what numeric(20,2) stores, and the same
+ * 18 integer digits bound Money.from accepts. A credit past it is a business
+ * rejection (BALANCE_LIMIT_EXCEEDED), not a database overflow.
+ */
+export const MAX_BALANCE_AMOUNT = '999999999999999999.99';
+
 export class InvalidWalletError extends DomainError {
   readonly code = 'INVALID_WALLET';
 }
@@ -17,6 +24,14 @@ export class InvalidWalletError extends DomainError {
  */
 export class InsufficientFundsError extends DomainError {
   readonly code = 'INSUFFICIENT_FUNDS';
+}
+
+/**
+ * credit() would take the balance past MAX_BALANCE_AMOUNT. Same role as
+ * InsufficientFundsError: callers ask canCredit() first and reject the transaction.
+ */
+export class BalanceLimitExceededError extends DomainError {
+  readonly code = 'BALANCE_LIMIT_EXCEEDED';
 }
 
 export interface WalletState {
@@ -159,7 +174,19 @@ export class Wallet {
     return this.move(LedgerDirection.Debit, props);
   }
 
+  /** True when crediting money keeps the balance at or below MAX_BALANCE_AMOUNT. */
+  canCredit(money: Money): boolean {
+    this.assertSameCurrency(money);
+    const limit = Money.from({ amount: MAX_BALANCE_AMOUNT, currency: this.currency });
+    return !limit.isLessThan(this._balance.add(money));
+  }
+
   credit(props: MovementProps): WalletLedgerEntry {
+    if (!this.canCredit(props.money)) {
+      throw new BalanceLimitExceededError(
+        `Wallet ${this.id} has ${this._balance.toString()}, crediting ${props.money.toString()} passes ${MAX_BALANCE_AMOUNT}`,
+      );
+    }
     return this.move(LedgerDirection.Credit, props);
   }
 

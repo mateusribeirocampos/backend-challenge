@@ -10,6 +10,11 @@ export const FailureCode = {
   InsufficientFunds: 'INSUFFICIENT_FUNDS',
   /** A reversal (ROLLBACK of a WIN or REFUND) would leave the balance negative. Spec rule 9. */
   ReversalWouldOverdraw: 'REVERSAL_WOULD_OVERDRAW',
+  /**
+   * A credit would take the balance past the largest value the balance column stores
+   * (numeric(20,2): 999999999999999999.99). Recorded and replayed like any rejection.
+   */
+  BalanceLimitExceeded: 'BALANCE_LIMIT_EXCEEDED',
   /** Transaction currency differs from the wallet currency. */
   CurrencyMismatch: 'CURRENCY_MISMATCH',
   /** The wallet exists but belongs to another player. */
