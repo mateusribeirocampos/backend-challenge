@@ -1,0 +1,45 @@
+# Local environment only. Credentials below are dummy values for containers on this machine.
+#
+# docker compose up -d   -> postgres + SQS emulator (dev and tests)
+
+name: wagering
+
+services:
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: wagering
+      POSTGRES_PASSWORD: wagering
+      POSTGRES_DB: wagering
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      - ./docker/postgres:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      # pg_isready alone turns green before the init scripts finish;
+      # checking the test database confirms the init script already ran.
+      test: ["CMD-SHELL", "pg_isready -U wagering -d wagering_test"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+
+  sqs:
+    # MiniStack instead of LocalStack: the current LocalStack image exits without
+    # LOCALSTACK_AUTH_TOKEN (see README). MiniStack is MIT and needs no account.
+    image: ministackorg/ministack:1.5.22
+    environment:
+      AWS_DEFAULT_REGION: us-east-1
+    ports:
+      - "4566:4566"
+    volumes:
+      - ./docker/ministack:/etc/localstack/init/ready.d:ro
+    healthcheck:
+      # Healthy only after the init script created the last queue.
+      test: ["CMD-SHELL", "awslocal sqs get-queue-url --queue-name wagering-events.fifo >/dev/null 2>&1"]
+      interval: 3s
+      timeout: 5s
+      retries: 20
+
+volumes:
+  postgres-data:
