@@ -46,6 +46,22 @@ Os testes de integração usam o PostgreSQL e o SQS reais dos containers. Nenhum
 | Unicidade, imutabilidade e não negatividade no schema do banco | `bun test test/integration/schema` tenta violar cada garantia com SQL direto | `src/infrastructure/persistence/migrations` |
 | Saldo da wallet igual ao saldo reconstruído pelo ledger | mesmos testes: o banco recusa o commit em que os dois divergem | migration `create_wallet_ledger_entries` |
 | Lock por wallet sem deadlock no cenário de duas apostas de 80 com saldo 100 | `bun test test/integration/schema/wallet-lock-order.schema.test.ts` | `ARCHITECTURE.md`, seção Concorrência |
+| A mesma aposta enviada 50 vezes em paralelo gera um único débito | `bun test test/integration/wagering/concurrency.test.ts` (HTTP real, `Promise.all`) | `src/application/wagering/process-wager-transaction.ts` |
+| Saldo 100 e duas apostas de 80 em paralelo: uma processada, uma rejeitada por saldo insuficiente, saldo final 20,00, um débito | mesmo teste | `src/infrastructure/persistence/repositories/mikro-orm-wallet.repository.ts` (`lockById`) |
+| Wallets diferentes em paralelo, sem lock global | mesmo teste, incluindo uma wallet processada enquanto outra está travada | idem |
+| Saldo da wallet igual ao saldo reconstruído pelo ledger ao fim de cada teste | todo teste de `test/integration/wagering` que movimenta uma wallet | `test/integration/wagering/support/wagering-api.ts` (`expectBalanceMatchesLedger`) |
+| Idempotência persistente: replay devolve o resultado original com `idempotentReplay` e o saldo da época | `bun test test/integration/wagering/idempotency.test.ts` | `src/infrastructure/persistence/repositories/mikro-orm-wager-transaction.repository.ts` (`insertIfAbsent`) |
+| Mesma chave com payload diferente é conflito (409) e não altera nada | mesmo teste | `src/application/wagering/process-wager-transaction.ts` |
+| Hash do payload sobre JSON canônico, sem o header | `bun test test/unit/application/wagering` | `src/application/wagering/payload-hash.ts` |
+| Chave de idempotência no espaço do provedor (`{providerId}:`) | `bun test test/unit/domain/wager` e `test/integration/wagering/http-status-mapping.test.ts` | `src/domain/wager/wager-transaction.ts` |
+| Wallet, transação, ledger e outbox na mesma transação SQL (tudo ou nada) | `bun test test/integration/wagering/atomicity-and-outbox.test.ts` força uma falha depois do lançamento do ledger | `src/application/wagering/process-wager-transaction.ts` |
+| Criar wallet grava a transação `OPENING` e o crédito na mesma transação; wallet duplicada é conflito | mesmo teste e `http-status-mapping.test.ts` | `src/application/wallets/open-wallet.ts` |
+| Eventos na outbox: `WalletBalanceChanged` só quando o saldo muda (LOSS não gera) | `atomicity-and-outbox.test.ts` | `src/domain/events/wagering-events.ts` |
+| Envelope dos eventos e backoff com jitter da outbox | `bun test test/unit/domain/events test/unit/domain/outbox` | `src/domain/events/integration-event.ts`, `src/domain/outbox/outbox-message.ts` |
+| Status HTTP distintos para payload inválido, conflito, rejeição, pendente e falha transitória; envelope de erro único; caracteres de controle e corpo grande demais são 400 e 413, nunca 503 ou 500 | `bun test test/integration/wagering/http-status-mapping.test.ts` | `src/interfaces/http/api-exception.filter.ts`, `src/interfaces/http/wager-response-status.ts` |
+| Falhas transitórias do banco viram 503 com `Retry-After`; violação de constraint, estouro numérico e `08P01` não | `bun test test/unit/infrastructure` e o teste de lock timeout em `http-status-mapping.test.ts` | `src/infrastructure/persistence/database-error-classifier.ts` |
+| Crédito acima do maior saldo que a coluna guarda vira rejeição `BALANCE_LIMIT_EXCEEDED`, não erro 500 | `bun test test/unit/domain` e `http-status-mapping.test.ts` | `src/domain/wallet/wallet.ts` (`canCredit`) |
+| Ponto de extensão de autenticação | leitura do código | `src/interfaces/http/provider-auth.guard.ts`, `src/application/ports/provider-identity.ts` |
 
 ### Conferindo à mão
 
@@ -53,6 +69,15 @@ Os testes de integração usam o PostgreSQL e o SQS reais dos containers. Nenhum
 bun run start
 curl -i localhost:3000/health/live
 curl -i localhost:3000/health/ready
+
+# abre uma wallet com 100,00 (guarde o "id" da resposta)
+curl -i -X POST localhost:3000/wallets -H 'content-type: application/json' \
+  -d '{"playerId":"0192f28f-5dc0-7d58-bdb2-814ad6a0f4a1","initialBalance":{"amount":"100.00","currency":"BRL"}}'
+
+# aposta de 25,00; repetir o mesmo comando devolve 200 com "idempotentReplay": true
+curl -i -X POST localhost:3000/wagering/transactions -H 'content-type: application/json' \
+  -H 'Idempotency-Key: provider-a:transaction-123' \
+  -d '{"providerId":"provider-a","externalTransactionId":"transaction-123","playerId":"0192f28f-5dc0-7d58-bdb2-814ad6a0f4a1","walletId":"<id da wallet>","roundId":"round-987","gameId":"fortune-chimp","kind":"BET","money":{"amount":"25.00","currency":"BRL"}}'
 ```
 
 Para ver a aplicação com três instâncias:
