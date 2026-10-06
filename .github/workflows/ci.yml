@@ -1,0 +1,46 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.2
+
+      - name: Ambiente local
+        run: cp .env.example .env
+
+      - name: PostgreSQL e SQS
+        run: docker compose up -d --wait
+
+      - name: Dependências
+        run: bun install --frozen-lockfile
+
+      - name: Migrations
+        run: bun run migration:up
+
+      - name: Typecheck
+        run: bun run typecheck
+
+      - name: Testes
+        run: bun test
+
+      - name: Logs dos containers
+        if: failure()
+        run: docker compose logs --no-color
+
+      - name: Imagem da aplicação
+        run: docker build -q -t wagering:ci .
