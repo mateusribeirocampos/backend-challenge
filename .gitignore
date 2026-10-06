@@ -1,0 +1,57 @@
+# dependencies
+node_modules/
+
+# build
+dist/
+*.tsbuildinfo
+
+# env
+.env
+.env.*
+!.env.example
+
+# tests / coverage
+coverage/
+.nyc_output/
+
+# logs
+*.log
+logs/
+
+# IDE
+.idea/
+.vscode/
+.devcontainer/
+*.code-workspace
+[._]*.sw[a-p]
+.DS_Store
+
+# docker / localstack volumes
+.localstack/
+volume/
+
+# load test output
+load-results/
+
+# secrets / keys
+*.pem
+*.key
+*.p12
+*.pfx
+id_rsa*
+secrets/
+credentials*
+
+# IA
+.claude
+.agents
+CLAUDE.md
+CLAUDE.local.md
+AGENTS.md
+GEMINI.md
+.mcp.json
+.cursor/
+.cursorrules
+.windsurf/
+.aider*
+.github/copilot-instructions.md
