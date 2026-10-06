@@ -3,6 +3,7 @@ import { Migrator } from '@mikro-orm/migrations';
 import { defineConfig, type Options } from '@mikro-orm/postgresql';
 import type { DatabaseConfig } from '../config/app-config.js';
 import { BlankMigrationGenerator } from './blank-migration-generator.js';
+import { ENTITIES } from './entities/index.js';
 
 export const MIGRATIONS_DIR = fileURLToPath(new URL('./migrations', import.meta.url));
 
@@ -18,11 +19,10 @@ export function buildMikroOrmConfig(database: DatabaseConfig): Options {
     password: database.password,
     dbName: database.dbName,
 
-    // Entities are listed explicitly (defineEntity schemas, added from Slice 1 on).
+    // Entities are listed explicitly (defineEntity schemas, outside the domain).
     // No folder discovery and no metadata provider, so nothing depends on how
     // Bun emits decorator metadata.
-    entities: [],
-    discovery: { warnWhenNoEntities: false },
+    entities: ENTITIES,
 
     // Every unit of work must fork the EntityManager (request context or em.fork()).
     // A shared global identity map would leak entities between concurrent requests.

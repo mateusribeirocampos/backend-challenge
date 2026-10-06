@@ -1,0 +1,51 @@
+import { ConnectionException } from '@mikro-orm/core';
+
+/**
+ * SQLSTATEs for which the same request, sent again, can succeed. Everything else is
+ * not transient: a constraint violation, a numeric overflow (22003) or a trigger
+ * raising an error gives the same answer on every retry, so retrying only adds load.
+ */
+const TRANSIENT_SQLSTATES = new Set([
+  '55P03', // lock_not_available: our lock_timeout expired waiting for the wallet row
+  '40P01', // deadlock_detected
+  '40001', // serialization_failure
+  '57P01', // admin_shutdown: the server is restarting
+  '57P02', // crash_shutdown
+  '57P03', // cannot_connect_now: the server is starting
+  '53300', // too_many_connections
+  // Class 08, connection exception: only the codes that mean "the connection failed".
+  // 08P01 (protocol_violation) is NOT here: PostgreSQL raises it for a payload it cannot
+  // accept, such as a NUL byte in a text parameter, and that payload fails on every retry.
+  '08000', // connection_exception
+  '08001', // sqlclient_unable_to_establish_sqlconnection
+  '08003', // connection_does_not_exist
+  '08006', // connection_failure
+]);
+
+/** Socket errors raised by the driver before PostgreSQL even answers. */
+const TRANSIENT_NETWORK_CODES = new Set(['ECONNREFUSED', 'ECONNRESET', 'ETIMEDOUT', 'EPIPE', 'EHOSTUNREACH', 'EAI_AGAIN']);
+
+/** pg raises these without a code when the connection drops in the middle of a query. */
+const CONNECTION_LOST_MESSAGES = ['Connection terminated', 'connection timeout', 'timeout exceeded when trying to connect'];
+
+export function isTransientDatabaseError(error: unknown): boolean {
+  if (!(error instanceof Error)) {
+    return false;
+  }
+  if (error instanceof ConnectionException) {
+    return true;
+  }
+  const code = (error as { code?: unknown }).code;
+  if (typeof code === 'string' && isTransientCode(code)) {
+    return true;
+  }
+  // Node reports a refused connection to several addresses as an AggregateError.
+  if (error instanceof AggregateError && error.errors.some((inner) => isTransientDatabaseError(inner))) {
+    return true;
+  }
+  return CONNECTION_LOST_MESSAGES.some((text) => error.message.includes(text));
+}
+
+function isTransientCode(code: string): boolean {
+  return TRANSIENT_SQLSTATES.has(code) || TRANSIENT_NETWORK_CODES.has(code);
+}
