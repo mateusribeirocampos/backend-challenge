@@ -1,6 +1,10 @@
 # Local environment only. Credentials below are dummy values for containers on this machine.
 #
-# docker compose up -d   -> postgres + SQS emulator (dev and tests)
+# docker compose up -d                                   -> postgres + SQS emulator (dev and tests)
+# docker compose --profile app up -d --build --scale app=3 -> also runs 3 app instances
+#
+# The app instances live behind the "app" profile so they do not consume test messages
+# from the queues while `bun test` runs on the host.
 
 name: wagering
 
@@ -40,6 +44,37 @@ services:
       interval: 3s
       timeout: 5s
       retries: 20
+
+  migrate:
+    profiles: ["app"]
+    build: .
+    command: ["bun", "scripts/migrate.ts", "up"]
+    env_file: .env.example
+    environment:
+      DATABASE_HOST: postgres
+      SQS_ENDPOINT: http://sqs:4566
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  app:
+    profiles: ["app"]
+    build: .
+    env_file: .env.example
+    environment:
+      DATABASE_HOST: postgres
+      SQS_ENDPOINT: http://sqs:4566
+    # Container port only: Docker picks a free host port for each replica,
+    # so --scale app=3 does not collide. `docker compose port --index 2 app 3000` shows it.
+    ports:
+      - "3000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      sqs:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
 
 volumes:
   postgres-data:
