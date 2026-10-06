@@ -3,6 +3,8 @@
 Processador distribuído de transações de apostas (desafio técnico Jungle Gaming).
 Stack: Bun, TypeScript estrito, NestJS, MikroORM 7 com PostgreSQL, SQS emulado pelo MiniStack.
 
+As decisões técnicas, os trade-offs e as limitações estão em [ARCHITECTURE.md](ARCHITECTURE.md).
+
 ## Requisitos
 
 - Bun 1.x (`curl -fsSL https://bun.sh/install | bash`)
@@ -38,6 +40,12 @@ Os testes de integração usam o PostgreSQL e o SQS reais dos containers. Nenhum
 | Health de liveness e readiness, sem autenticação | `bun test test/integration/health.test.ts` | `src/interfaces/http/health.controller.ts` |
 | Readiness indica qual dependência caiu | mesmo teste: fila inexistente e endpoint sem resposta devolvem 503 com `failed: ["sqs"]` | `src/application/health/check-readiness.ts` |
 | Configuração inválida impede o boot | `bun run test:unit` | `src/infrastructure/config/app-config.ts` |
+| Dinheiro sem `number`, escala fixa de 2 casas, entradas inválidas recusadas, conflito de moeda | `bun test test/unit/domain/money` | `src/domain/money/money.ts` |
+| Regras de BET, WIN, LOSS, REFUND e ROLLBACK | `bun test test/unit/domain/wager` | `src/domain/wager/apply-wager-transaction.ts` |
+| Invariantes da wallet (saldo nunca negativo, versão, moeda) | `bun test test/unit/domain/wallet` | `src/domain/wallet/wallet.ts` |
+| Unicidade, imutabilidade e não negatividade no schema do banco | `bun test test/integration/schema` tenta violar cada garantia com SQL direto | `src/infrastructure/persistence/migrations` |
+| Saldo da wallet igual ao saldo reconstruído pelo ledger | mesmos testes: o banco recusa o commit em que os dois divergem | migration `create_wallet_ledger_entries` |
+| Lock por wallet sem deadlock no cenário de duas apostas de 80 com saldo 100 | `bun test test/integration/schema/wallet-lock-order.schema.test.ts` | `ARCHITECTURE.md`, seção Concorrência |
 
 ### Conferindo à mão
 
