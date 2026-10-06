@@ -476,6 +476,45 @@ describe('wallet checks', () => {
   });
 });
 
+describe('balance limit (the largest value numeric(20,2) stores)', () => {
+  test('a WIN that would pass the limit is REJECTED with BALANCE_LIMIT_EXCEEDED; nothing moves', () => {
+    const scenario = scenarioWith('999999999999999990.00');
+
+    const { transaction, outcome } = scenario.play({ kind: 'WIN', money: brl('10.00'), externalTransactionId: 'w1' });
+
+    expectRejected(outcome, FailureCode.BalanceLimitExceeded, '999999999999999990.00');
+    expect(transaction.resultBalance?.amount).toBe('999999999999999990.00');
+    expect(scenario.ledger).toHaveLength(0);
+    expect(scenario.wallet.version).toBe(1);
+    scenario.assertBalanceMatchesLedger();
+  });
+
+  test('a WIN that lands exactly on the limit is PROCESSED', () => {
+    const scenario = scenarioWith('999999999999999990.00');
+
+    const { outcome } = scenario.play({ kind: 'WIN', money: brl('9.99'), externalTransactionId: 'w1' });
+
+    expectProcessed(outcome, '999999999999999999.99');
+    scenario.assertBalanceMatchesLedger();
+  });
+
+  test('a reversal that credits past the limit gets the same code (not REVERSAL_WOULD_OVERDRAW)', () => {
+    const scenario = scenarioWith('999999999999999999.99');
+    scenario.play({ kind: 'BET', money: brl('10.00'), externalTransactionId: 'b1' });
+    scenario.play({ kind: 'WIN', money: brl('10.00'), externalTransactionId: 'w1', referenceExternalTransactionId: 'b1' });
+
+    const { outcome } = scenario.play({
+      kind: 'ROLLBACK',
+      money: brl('10.00'),
+      externalTransactionId: 'r1',
+      referenceExternalTransactionId: 'b1',
+    });
+
+    expectRejected(outcome, FailureCode.BalanceLimitExceeded, '999999999999999999.99');
+    scenario.assertBalanceMatchesLedger();
+  });
+});
+
 describe('caller bugs throw instead of producing an outcome', () => {
   test('a terminal transaction cannot be applied again', () => {
     const scenario = scenarioWith('100.00');

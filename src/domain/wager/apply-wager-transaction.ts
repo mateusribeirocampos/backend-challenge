@@ -8,7 +8,7 @@ import { WagerTransactionStatus } from './wager-transaction-status.js';
 import type { WagerTransaction } from './wager-transaction.js';
 
 export interface ApplyWagerTransactionInput {
-  /** The wallet named by transaction.walletId. Slice 2 loads it with SELECT ... FOR UPDATE. */
+  /** The wallet named by transaction.walletId, loaded and locked with SELECT ... FOR NO KEY UPDATE (ADR-002). */
   readonly wallet: Wallet;
   /** PENDING or PENDING_REFERENCE. */
   readonly transaction: WagerTransaction;
@@ -134,6 +134,11 @@ function applyToBalance(input: ApplyWagerTransactionInput): WagerOutcome {
     // Spec rule 9: a reversal without funds is a different situation from a bet without funds.
     const code = isReversal(transaction.kind) ? FailureCode.ReversalWouldOverdraw : FailureCode.InsufficientFunds;
     return reject(input, code, wallet.balance);
+  }
+  if (direction === LedgerDirection.Credit && !wallet.canCredit(transaction.money)) {
+    // The balance column has a ceiling; refusing here keeps it a recorded business answer
+    // instead of a numeric overflow (22003) that would only surface as a 500.
+    return reject(input, FailureCode.BalanceLimitExceeded, wallet.balance);
   }
 
   const movement = {

@@ -12,6 +12,9 @@ import { canTransition, isTerminalStatus, WagerTransactionStatus } from './wager
 /** providerId used only by OPENING rows. A real provider cannot use it. */
 export const INTERNAL_PROVIDER_ID = 'internal';
 
+/** Separates the provider namespace from the rest of an idempotency key: "provider-a:transaction-123". */
+export const IDEMPOTENCY_NAMESPACE_SEPARATOR = ':';
+
 /** The transaction cannot be created as submitted. Never stored; the payload must be fixed. */
 export class InvalidWagerTransactionError extends DomainError {
   constructor(
@@ -156,7 +159,7 @@ export class WagerTransaction {
       id: props.id,
       providerId: INTERNAL_PROVIDER_ID,
       externalTransactionId,
-      idempotencyKey: `${INTERNAL_PROVIDER_ID}:${externalTransactionId}`,
+      idempotencyKey: `${INTERNAL_PROVIDER_ID}${IDEMPOTENCY_NAMESPACE_SEPARATOR}${externalTransactionId}`,
       payloadHash: undefined,
       walletId: props.walletId,
       playerId: props.playerId,
@@ -329,9 +332,33 @@ export class WagerTransaction {
         `providerId "${INTERNAL_PROVIDER_ID}" is reserved`,
       );
     }
+    WagerTransaction.assertIdempotencyNamespace(props.providerId, props.idempotencyKey);
 
     WagerTransaction.assertReferenceShape(props);
     WagerTransaction.assertAmount(props.kind, props.money);
+  }
+
+  /**
+   * Every key lives in its provider's namespace: "{providerId}:{anything}". The key is the
+   * source of truth for idempotency, so a key outside the namespace would let one
+   * provider collide with (or block) another provider's operations, or with the
+   * "internal:" keys of OPENING. A ":" inside providerId would make two namespaces
+   * overlap ("a" and "a:b" both own "a:b:x"), so it is refused too.
+   */
+  private static assertIdempotencyNamespace(providerId: string, idempotencyKey: string): void {
+    if (providerId.includes(IDEMPOTENCY_NAMESPACE_SEPARATOR)) {
+      throw new InvalidWagerTransactionError(
+        ContractViolationCode.InvalidFormat,
+        `providerId cannot contain "${IDEMPOTENCY_NAMESPACE_SEPARATOR}"`,
+      );
+    }
+    const namespace = `${providerId}${IDEMPOTENCY_NAMESPACE_SEPARATOR}`;
+    if (!idempotencyKey.startsWith(namespace) || idempotencyKey.length === namespace.length) {
+      throw new InvalidWagerTransactionError(
+        ContractViolationCode.IdempotencyKeyInvalid,
+        `Idempotency key must start with "${namespace}" followed by the operation id`,
+      );
+    }
   }
 
   private static assertReferenceShape(props: CreateWagerTransactionProps): void {

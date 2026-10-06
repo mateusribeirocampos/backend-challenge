@@ -10,6 +10,11 @@ export const FailureCode = {
   InsufficientFunds: 'INSUFFICIENT_FUNDS',
   /** A reversal (ROLLBACK of a WIN or REFUND) would leave the balance negative. Spec rule 9. */
   ReversalWouldOverdraw: 'REVERSAL_WOULD_OVERDRAW',
+  /**
+   * A credit would take the balance past the largest value the balance column stores
+   * (numeric(20,2): 999999999999999999.99). Recorded and replayed like any rejection.
+   */
+  BalanceLimitExceeded: 'BALANCE_LIMIT_EXCEEDED',
   /** Transaction currency differs from the wallet currency. */
   CurrencyMismatch: 'CURRENCY_MISMATCH',
   /** The wallet exists but belongs to another player. */
@@ -56,5 +61,14 @@ export const ContractViolationCode = {
   SelfReference: 'SELF_REFERENCE',
   /** Zero amount where the kind must move the balance (BET, WIN, REFUND, ROLLBACK). */
   InvalidAmount: 'INVALID_AMOUNT',
+  /**
+   * The idempotency key is not inside the provider namespace "{providerId}:...". Without
+   * this, provider B could take provider A's keys, or the reserved "internal:" ones.
+   */
+  IdempotencyKeyInvalid: 'IDEMPOTENCY_KEY_INVALID',
+  /** A field has the wrong shape (not a UUID, a providerId with ":", a control character, text too long). */
+  InvalidFormat: 'INVALID_FORMAT',
+  /** Money that Money.from refuses: NaN, "1e3", "1.234", "-5.00", "brl"... */
+  InvalidMoney: 'INVALID_MONEY',
 } as const;
 export type ContractViolationCode = (typeof ContractViolationCode)[keyof typeof ContractViolationCode];
