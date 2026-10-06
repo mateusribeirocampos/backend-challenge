@@ -4,9 +4,12 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "start": "bun src/main.ts",
+    "dev": "bun --watch src/main.ts",
     "typecheck": "bunx tsc --noEmit -p tsconfig.json",
     "test": "bun test",
-    "test:unit": "bun test test/unit"
+    "test:unit": "bun test test/unit",
+    "test:integration": "bun test test/integration"
   },
   "dependencies": {
     "@aws-sdk/client-sqs": "^3.1146.0",
