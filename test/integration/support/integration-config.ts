@@ -10,6 +10,8 @@ export function integrationConfig(): AppConfig {
   return {
     ...base,
     database: { ...base.database, dbName: process.env.TEST_DATABASE_NAME ?? 'wagering_test' },
+    // The suite also exercises USD wallets (currency conflicts); production defaults to BRL only.
+    wallets: { supportedCurrencies: ['BRL', 'USD'] },
     sqs: { ...base.sqs, consumer: { ...base.sqs.consumer, enabled: false } },
   };
 }

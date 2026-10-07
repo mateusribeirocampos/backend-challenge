@@ -15,6 +15,7 @@ import { UuidV7IdGenerator } from './infrastructure/system/uuid-v7-id-generator.
 import { ProviderAuthGuard } from './interfaces/http/provider-auth.guard.js';
 import { WagerTransactionsController } from './interfaces/http/wager-transactions.controller.js';
 import { WalletsController } from './interfaces/http/wallets.controller.js';
+import { APP_CONFIG, type AppConfig } from './infrastructure/config/app-config.js';
 
 /**
  * Composition root of the wallet and wagering features. The use cases are plain
@@ -34,8 +35,9 @@ import { WalletsController } from './interfaces/http/wallets.controller.js';
     },
     {
       provide: OpenWallet,
-      useFactory: (runner: TransactionRunner, clock: Clock, ids: IdGenerator) => new OpenWallet(runner, clock, ids),
-      inject: [TRANSACTION_RUNNER, CLOCK, ID_GENERATOR],
+      useFactory: (runner: TransactionRunner, clock: Clock, ids: IdGenerator, config: AppConfig) =>
+        new OpenWallet(runner, clock, ids, config.wallets.supportedCurrencies),
+      inject: [TRANSACTION_RUNNER, CLOCK, ID_GENERATOR, APP_CONFIG],
     },
     {
       provide: GetWallet,

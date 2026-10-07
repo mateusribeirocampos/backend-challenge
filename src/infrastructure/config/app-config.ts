@@ -1,3 +1,4 @@
+import { Money } from '../../domain/money/money.js';
 import { z } from 'zod';
 
 /**
@@ -7,6 +8,8 @@ import { z } from 'zod';
  */
 export interface AppConfig {
   readonly http: { readonly port: number };
+  /** Currencies the platform operates; a wallet can only be opened in one of them. */
+  readonly wallets: { readonly supportedCurrencies: readonly string[] };
   readonly database: DatabaseConfig;
   readonly sqs: SqsConfig;
 }
@@ -70,6 +73,23 @@ function integerBetween(min: number, max: number) {
   return z.coerce.number(message).int(message).min(min, message).max(max, message);
 }
 
+/** Comma separated ISO-4217 codes (BRL,USD). Each must pass the same check as Money. */
+const currencyList = z
+  .string()
+  .transform((value) => value.split(',').map((code) => code.trim()))
+  .refine((codes) => codes.every((code) => isCurrencyCode(code)), {
+    message: 'must be a comma separated list of ISO-4217 currency codes like BRL,USD',
+  });
+
+function isCurrencyCode(code: string): boolean {
+  try {
+    Money.zero(code);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 const envSchema = z
   .object({
     PORT: portNumber.default(3000),
@@ -90,6 +110,7 @@ const envSchema = z
     SQS_CONSUMER_SHUTDOWN_TIMEOUT_SECONDS: integerBetween(1, 300).default(15),
     SQS_CONSUMER_RETRY_BASE_SECONDS: integerBetween(1, 3600).default(5),
     SQS_CONSUMER_RETRY_MAX_SECONDS: integerBetween(1, 43_200).default(300),
+    SUPPORTED_CURRENCIES: currencyList.default(['BRL']),
   })
   .refine((env) => (env.AWS_ACCESS_KEY_ID === undefined) === (env.AWS_SECRET_ACCESS_KEY === undefined), {
     message: 'AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY must be set together or both left empty',
@@ -112,6 +133,7 @@ export function loadConfig(rawEnv: RawEnv): AppConfig {
   const env = parsed.data;
   return {
     http: { port: env.PORT },
+    wallets: { supportedCurrencies: env.SUPPORTED_CURRENCIES },
     database: {
       host: env.DATABASE_HOST,
       port: env.DATABASE_PORT,

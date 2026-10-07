@@ -67,6 +67,15 @@ export class WalletAlreadyExistsError extends ApplicationError {
   }
 }
 
+/** The currency is a valid ISO-4217 code, but the platform does not operate it (SUPPORTED_CURRENCIES). */
+export class CurrencyNotSupportedError extends ApplicationError {
+  readonly code = 'CURRENCY_NOT_SUPPORTED';
+
+  constructor(currency: string, supported: readonly string[]) {
+    super(`Currency ${currency} is not operated by this platform (supported: ${supported.join(', ')})`);
+  }
+}
+
 export class WalletNotFoundError extends ApplicationError {
   readonly code = 'WALLET_NOT_FOUND';
 

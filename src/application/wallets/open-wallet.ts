@@ -2,7 +2,7 @@ import { WagerTransactionProcessed, WalletBalanceChanged } from '../../domain/ev
 import { Money, type MoneyProps } from '../../domain/money/money.js';
 import { OutboxMessage } from '../../domain/outbox/outbox-message.js';
 import { Wallet } from '../../domain/wallet/wallet.js';
-import { WalletAlreadyExistsError } from '../errors.js';
+import { CurrencyNotSupportedError, WalletAlreadyExistsError } from '../errors.js';
 import type { Clock } from '../ports/clock.js';
 import type { IdGenerator } from '../ports/id-generator.js';
 import type { TransactionRunner } from '../ports/transaction-runner.js';
@@ -24,14 +24,21 @@ export class OpenWallet {
     private readonly runner: TransactionRunner,
     private readonly clock: Clock,
     private readonly ids: IdGenerator,
+    /** Currencies the platform operates (config). Money checks the code is valid ISO-4217; this checks it is ours. */
+    private readonly supportedCurrencies: readonly string[],
   ) {}
 
   async execute(command: OpenWalletCommand): Promise<WalletView> {
+    const initialBalance = Money.from(command.initialBalance);
+    if (!this.supportedCurrencies.includes(initialBalance.currency)) {
+      throw new CurrencyNotSupportedError(initialBalance.currency, this.supportedCurrencies);
+    }
+
     const at = this.clock.now();
     const { wallet, opening } = Wallet.open({
       id: this.ids.newId(),
       playerId: command.playerId,
-      initialBalance: Money.from(command.initialBalance),
+      initialBalance,
       at,
       openingTransactionId: this.ids.newId(),
       openingLedgerEntryId: this.ids.newId(),
