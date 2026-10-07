@@ -5,6 +5,7 @@ import {
   IdempotencyKeyConflictError,
   TransientInfrastructureError,
   WagerTransactionNotFoundError,
+  CurrencyNotSupportedError,
   WalletAlreadyExistsError,
   WalletNotFoundError,
 } from '../../application/errors.js';
@@ -83,6 +84,11 @@ export class ApiExceptionFilter implements ExceptionFilter {
     }
     if (exception instanceof InvalidWalletError) {
       return invalid([{ code: ContractViolationCode.InvalidFormat, message: exception.message }]);
+    }
+
+    // 422: a business rule refused the request and nothing was stored (here: a currency the platform does not operate).
+    if (exception instanceof CurrencyNotSupportedError) {
+      return fromApplicationError(HttpStatus.UNPROCESSABLE_ENTITY, exception);
     }
 
     // 409: the key or the resource is already taken; resending the same thing will not help.

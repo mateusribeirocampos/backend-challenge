@@ -1,7 +1,8 @@
 import { type DynamicModule, type MiddlewareConsumer, Module, type NestModule } from '@nestjs/common';
 import { APP_FILTER } from '@nestjs/core';
 import { DEPENDENCY_CHECKS, type DependencyCheck } from './application/health/check-readiness.js';
-import { APP_CONFIG, type AppConfig } from './infrastructure/config/app-config.js';
+import type { AppConfig } from './infrastructure/config/app-config.js';
+import { AppConfigModule } from './infrastructure/config/app-config.module.js';
 import { MessagingModule } from './infrastructure/messaging/messaging.module.js';
 import { SqsQueueCheck } from './infrastructure/messaging/sqs-queue-check.js';
 import { ObservabilityModule } from './infrastructure/observability/observability.module.js';
@@ -23,6 +24,7 @@ export class AppModule implements NestModule {
     return {
       module: AppModule,
       imports: [
+        AppConfigModule.register(config),
         ObservabilityModule,
         PersistenceModule.register(config.database),
         MessagingModule.register(config.sqs),
@@ -31,7 +33,6 @@ export class AppModule implements NestModule {
       ],
       controllers: [HealthController],
       providers: [
-        { provide: APP_CONFIG, useValue: config },
         // One error envelope for every endpoint (ADR-007).
         { provide: APP_FILTER, useClass: ApiExceptionFilter },
         {

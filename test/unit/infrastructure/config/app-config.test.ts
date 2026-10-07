@@ -156,3 +156,21 @@ describe('loadConfig', () => {
     ]);
   });
 });
+
+describe('loadConfig: SUPPORTED_CURRENCIES', () => {
+  test('defaults to BRL only', () => {
+    expect(loadConfig(validEnv).wallets.supportedCurrencies).toEqual(['BRL']);
+  });
+
+  test('reads a comma separated list and ignores spaces', () => {
+    const config = loadConfig({ ...validEnv, SUPPORTED_CURRENCIES: 'BRL, USD ,EUR' });
+
+    expect(config.wallets.supportedCurrencies).toEqual(['BRL', 'USD', 'EUR']);
+  });
+
+  test.each(['ABC', 'XXX', 'brl', 'BRL,,USD'])('refuses %p: every entry must be an ISO-4217 currency code', (value) => {
+    expect(problemsFor({ ...validEnv, SUPPORTED_CURRENCIES: value })).toEqual([
+      expect.stringContaining('SUPPORTED_CURRENCIES:'),
+    ]);
+  });
+});

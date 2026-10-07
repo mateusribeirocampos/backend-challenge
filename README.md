@@ -41,6 +41,7 @@ Os testes de integração usam o PostgreSQL e o SQS reais dos containers. Nenhum
 | Readiness indica qual dependência caiu | mesmo teste: fila inexistente e endpoint sem resposta devolvem 503 com `failed: ["sqs"]` | `src/application/health/check-readiness.ts` |
 | Configuração inválida impede o boot | `bun run test:unit` | `src/infrastructure/config/app-config.ts` |
 | Dinheiro sem `number`, escala fixa de 2 casas, entradas inválidas recusadas, conflito de moeda | `bun test test/unit/domain/money` | `src/domain/money/money.ts` |
+| Wallet só nas moedas que a plataforma opera (`SUPPORTED_CURRENCIES`, padrão `BRL`) | `bun test test/integration/wagering/supported-currencies.test.ts` | `src/application/wallets/open-wallet.ts` |
 | Regras de BET, WIN, LOSS, REFUND e ROLLBACK | `bun test test/unit/domain/wager` | `src/domain/wager/apply-wager-transaction.ts` |
 | Invariantes da wallet (saldo nunca negativo, versão, moeda) | `bun test test/unit/domain/wallet` | `src/domain/wallet/wallet.ts` |
 | Unicidade, imutabilidade e não negatividade no schema do banco | `bun test test/integration/schema` tenta violar cada garantia com SQL direto | `src/infrastructure/persistence/migrations` |
