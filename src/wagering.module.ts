@@ -2,12 +2,16 @@ import { Module } from '@nestjs/common';
 import { MikroORM } from '@mikro-orm/postgresql';
 import { CLOCK, type Clock } from './application/ports/clock.js';
 import { ID_GENERATOR, type IdGenerator } from './application/ports/id-generator.js';
+import { METRICS, type Metrics } from './application/ports/metrics.js';
 import { PROVIDER_IDENTITY } from './application/ports/provider-identity.js';
+import { STRUCTURED_LOGGER, type StructuredLogger } from './application/ports/structured-logger.js';
 import { TRANSACTION_RUNNER, type TransactionRunner } from './application/ports/transaction-runner.js';
 import { GetWagerTransaction } from './application/wagering/get-wager-transaction.js';
 import { ProcessWagerTransaction } from './application/wagering/process-wager-transaction.js';
 import { GetWallet } from './application/wallets/get-wallet.js';
+import { GetWalletLedger } from './application/wallets/get-wallet-ledger.js';
 import { OpenWallet } from './application/wallets/open-wallet.js';
+import { ReconcileWallet } from './application/wallets/reconcile-wallet.js';
 import { NoopProviderIdentity } from './infrastructure/auth/noop-provider-identity.js';
 import { MikroOrmTransactionRunner } from './infrastructure/persistence/mikro-orm-transaction-runner.js';
 import { SystemClock } from './infrastructure/system/system-clock.js';
@@ -45,6 +49,17 @@ import { APP_CONFIG, type AppConfig } from './infrastructure/config/app-config.j
       inject: [TRANSACTION_RUNNER],
     },
     {
+      provide: GetWalletLedger,
+      useFactory: (runner: TransactionRunner) => new GetWalletLedger(runner),
+      inject: [TRANSACTION_RUNNER],
+    },
+    {
+      provide: ReconcileWallet,
+      useFactory: (runner: TransactionRunner, metrics: Metrics, logger: StructuredLogger) =>
+        new ReconcileWallet(runner, metrics, logger),
+      inject: [TRANSACTION_RUNNER, METRICS, STRUCTURED_LOGGER],
+    },
+    {
       provide: ProcessWagerTransaction,
       useFactory: (runner: TransactionRunner, clock: Clock, ids: IdGenerator) =>
         new ProcessWagerTransaction(runner, clock, ids),
@@ -57,7 +72,8 @@ import { APP_CONFIG, type AppConfig } from './infrastructure/config/app-config.j
     },
     ProviderAuthGuard,
   ],
-  // The SQS consumer runs the same use case as POST /wagering/transactions.
-  exports: [ProcessWagerTransaction],
+  // The SQS consumer runs the same use case as POST /wagering/transactions; the
+  // background workers use the same transaction runner, clock and id generator.
+  exports: [ProcessWagerTransaction, TRANSACTION_RUNNER, CLOCK, ID_GENERATOR],
 })
 export class WageringModule {}

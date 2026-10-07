@@ -1,6 +1,6 @@
 import { defineEntity, type InferEntity, p } from '@mikro-orm/core';
 
-/** Mapping of outbox_messages. locked_until (the publisher lease) is not mapped yet. */
+/** Mapping of outbox_messages. sequence_number and the lease columns are used only by the publisher SQL. */
 export const OutboxMessageEntity = defineEntity({
   name: 'OutboxMessageRecord',
   tableName: 'outbox_messages',

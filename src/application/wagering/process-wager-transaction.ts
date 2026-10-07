@@ -1,19 +1,8 @@
-import type { EventContext } from '../../domain/events/integration-event.js';
-import {
-  WagerTransactionPendingReference,
-  WagerTransactionProcessed,
-  WagerTransactionRejected,
-  WalletBalanceChanged,
-} from '../../domain/events/wagering-events.js';
-import { Money } from '../../domain/money/money.js';
-import { OutboxMessage } from '../../domain/outbox/outbox-message.js';
-import { DomainInvariantError } from '../../domain/shared/domain-error.js';
-import { applyWagerTransaction, type WagerOutcome } from '../../domain/wager/apply-wager-transaction.js';
-import { WagerTransactionStatus } from '../../domain/wager/wager-transaction-status.js';
-import { WagerTransaction } from '../../domain/wager/wager-transaction.js';
-import type { WagerTransactionKind } from '../../domain/wager/wager-transaction-kind.js';
-import type { Wallet } from '../../domain/wallet/wallet.js';
 import { InboxMessage } from '../../domain/inbox/inbox-message.js';
+import { Money } from '../../domain/money/money.js';
+import { DomainInvariantError } from '../../domain/shared/domain-error.js';
+import type { WagerTransactionKind } from '../../domain/wager/wager-transaction-kind.js';
+import { WagerTransaction } from '../../domain/wager/wager-transaction.js';
 import {
   ExternalTransactionIdConflictError,
   IdempotencyKeyConflictError,
@@ -24,6 +13,7 @@ import type { Clock } from '../ports/clock.js';
 import type { IdGenerator } from '../ports/id-generator.js';
 import type { Repositories } from '../ports/repositories.js';
 import type { TransactionRunner } from '../ports/transaction-runner.js';
+import { ApplyAndRecord } from './apply-and-record.js';
 import { computePayloadHash, type WagerPayload } from './payload-hash.js';
 import { toWagerResultView, type WagerResultView } from './wager-transaction-views.js';
 
@@ -62,19 +52,21 @@ export interface DeliveryResult {
  *        - not inserted -> this message was already processed: answer, change nothing;
  *   1. insert-first: INSERT the PENDING row ... ON CONFLICT DO NOTHING
  *        - not inserted -> replay (same payload hash) or conflict (different hash);
- *   2. lock the wallet row: SELECT ... FOR NO KEY UPDATE (lock_timeout 2s);
- *   3. resolve the reference and whether it was already reversed;
- *   4. applyWagerTransaction (pure domain rules);
- *   5. write wallet, transaction outcome, ledger entry and outbox events
- *      (SQS: and mark the inbox row processed);
+ *   2 to 5. ApplyAndRecord: lock the wallet row, resolve the reference, apply the
+ *      domain rules, write wallet, outcome, ledger entry and outbox events
+ *      (SQS: then mark the inbox row processed);
  *   6. COMMIT (the runner). Any error before it rolls back all of the above, inbox included.
  */
 export class ProcessWagerTransaction {
+  private readonly applyAndRecord: ApplyAndRecord;
+
   constructor(
     private readonly runner: TransactionRunner,
     private readonly clock: Clock,
     private readonly ids: IdGenerator,
-  ) {}
+  ) {
+    this.applyAndRecord = new ApplyAndRecord(clock, ids);
+  }
 
   /** HTTP entry: the Idempotency-Key is the only deduplication. */
   async execute(command: ProcessWagerTransactionCommand): Promise<WagerResultView> {
@@ -132,7 +124,15 @@ export class ProcessWagerTransaction {
     if (!isNewOperation) {
       return this.answerExistingOperation(repositories, transaction);
     }
-    return this.process(repositories, transaction, command);
+    await this.applyAndRecord.run(repositories, transaction, {
+      correlationId: command.correlationId,
+      causationId: command.causationId,
+      lastReferenceCheck: false,
+      referenceAttempts: 0,
+      // Due right away: the PENDING_REFERENCE worker owns the backoff from there on.
+      nextReferenceCheckAt: (at) => at,
+    });
+    return toWagerResultView(transaction, false);
   }
 
   /**
@@ -159,54 +159,6 @@ export class ProcessWagerTransaction {
       throw new DomainInvariantError(`Inbox message ${inbox.messageId} has no operation ${submitted.idempotencyKey}`);
     }
     return toWagerResultView(operation, true);
-  }
-
-  private async process(
-    repositories: Repositories,
-    transaction: WagerTransaction,
-    command: ProcessWagerTransactionCommand,
-  ): Promise<WagerResultView> {
-    // The insert above only happens when the wallet exists, and wallet_id is a foreign
-    // key, so the wallet is there. From here on, every other request for this wallet waits.
-    const wallet = await repositories.wallets.lockById(transaction.walletId);
-    if (wallet === undefined) {
-      throw new DomainInvariantError(`Wallet ${transaction.walletId} vanished after the insert`);
-    }
-    const versionBeforeApply = wallet.version;
-    // Read after the lock: a request that waited for the lock gets a time after the one it waited for.
-    const at = this.clock.now();
-    const { reference, referenceAlreadyReversed } = await this.resolveReference(repositories, transaction);
-
-    const outcome = applyWagerTransaction({
-      wallet,
-      transaction,
-      reference,
-      referenceAlreadyReversed,
-      ledgerEntryId: this.ids.newId(),
-      at,
-    });
-
-    // Write order follows the foreign keys: wallet, transaction, ledger entry, outbox.
-    const ledgerEntry = outcome.status === WagerTransactionStatus.Processed ? outcome.ledgerEntry : undefined;
-    if (ledgerEntry !== undefined) {
-      await repositories.wallets.saveBalance(wallet, versionBeforeApply);
-    }
-    await repositories.transactions.saveOutcome(transaction, {
-      // Due right away: the PENDING_REFERENCE worker owns the backoff from there on.
-      nextReferenceCheckAt: transaction.status === WagerTransactionStatus.PendingReference ? at : undefined,
-    });
-    if (ledgerEntry !== undefined) {
-      await repositories.ledger.append(ledgerEntry);
-    }
-    const context = (eventId: string): EventContext => ({
-      eventId,
-      correlationId: command.correlationId,
-      causationId: command.causationId,
-      occurredAt: at,
-    });
-    await repositories.outbox.add(this.eventsFor(outcome, transaction, wallet, context).map(OutboxMessage.enqueue));
-
-    return toWagerResultView(transaction, false);
   }
 
   /**
@@ -236,47 +188,5 @@ export class ProcessWagerTransaction {
     // Neither key existed, so the insert was skipped because the wallet does not exist.
     // Nothing is stored: wager_transactions.wallet_id is a foreign key.
     throw new WalletNotFoundError(submitted.walletId);
-  }
-
-  /**
-   * Spec 7 rule 2: the reference is looked up by (providerId, referenceExternalTransactionId).
-   * Read under the wallet lock, so "already reversed?" cannot change before the commit
-   * for references of this wallet (a reference of another wallet is rejected anyway).
-   */
-  private async resolveReference(
-    repositories: Repositories,
-    transaction: WagerTransaction,
-  ): Promise<{ reference: WagerTransaction | undefined; referenceAlreadyReversed: boolean }> {
-    const referenceExternalId = transaction.referenceExternalTransactionId;
-    if (referenceExternalId === undefined) {
-      return { reference: undefined, referenceAlreadyReversed: false };
-    }
-    const reference = await repositories.transactions.findByProviderAndExternalId(transaction.providerId, referenceExternalId);
-    if (reference === undefined) {
-      return { reference: undefined, referenceAlreadyReversed: false };
-    }
-    return { reference, referenceAlreadyReversed: await repositories.transactions.hasProcessedReversal(reference.id) };
-  }
-
-  /** Spec 11: Processed for any applied transaction; BalanceChanged only when a ledger entry exists. */
-  private eventsFor(
-    outcome: WagerOutcome,
-    transaction: WagerTransaction,
-    wallet: Wallet,
-    context: (eventId: string) => EventContext,
-  ) {
-    switch (outcome.status) {
-      case WagerTransactionStatus.Processed: {
-        const processed = WagerTransactionProcessed.from(transaction, context(this.ids.newId()));
-        if (outcome.ledgerEntry === undefined) {
-          return [processed]; // LOSS: recorded, balance unchanged
-        }
-        return [processed, WalletBalanceChanged.from(wallet, outcome.ledgerEntry, context(this.ids.newId()))];
-      }
-      case WagerTransactionStatus.Rejected:
-        return [WagerTransactionRejected.from(transaction, context(this.ids.newId()))];
-      case WagerTransactionStatus.PendingReference:
-        return [WagerTransactionPendingReference.from(transaction, context(this.ids.newId()))];
-    }
   }
 }

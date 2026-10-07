@@ -20,6 +20,10 @@ Em três frases: toda operação roda numa única transação SQL que grava prim
 | Garantias no schema (CHECK, UNIQUE, triggers, constraint triggers diferidas) | se o código tiver bug, o banco recusa o commit | garantias só na aplicação | `src/infrastructure/persistence/migrations` |
 | Ledger encadeado por `wallet_version` | saldo igual ao fim do ledger em todo commit e proteção contra lost update | coluna `seq` só para ordenar | migration `create_wallet_ledger_entries` |
 | Transactional outbox | evento só existe se o commit existir | publicar no SQS dentro da transação | `src/domain/outbox/outbox-message.ts` |
+| Publisher com lease: claim curto (`FOR UPDATE SKIP LOCKED`), envio fora da transação, depois marca ou agenda retry | nenhuma conexão nem lock preso enquanto o SQS responde; instância morta libera os eventos quando o lease vence | segurar a transação aberta durante o `SendMessage` (mais simples; prende conexão e linhas pelo tempo do SQS) | `src/application/outbox/publish-outbox.ts` |
+| Ordem por wallet: o claim pega a wallet pelo evento mais antigo pendente (`sequence_number`) | um evento nunca sai antes do anterior da mesma wallet, nem com dois publishers nem com retry | confiar só na FIFO e no `eventId` (dois publishers ou um retry inverteriam a ordem) | `src/infrastructure/persistence/repositories/mikro-orm-outbox.repository.ts` |
+| Worker de `PENDING_REFERENCE` pelo mesmo caminho do caso de uso, `FOR NO KEY UPDATE SKIP LOCKED` | um REFUND resolvido depois segue exatamente as regras de um REFUND que chegou na ordem | regras repetidas no worker | `src/application/wagering/apply-and-record.ts` |
+| Ledger paginado por cursor opaco de `wallet_version`; reconciliação numa instrução SQL que só relata | o índice vai direto à posição, sem buraco nem repetição com lançamentos novos; um snapshot sem lock; corrigir esconderia o problema | `OFFSET` (lê e descarta as linhas anteriores); lock na wallet; corrigir o saldo | `src/interfaces/http/ledger-cursor.ts`, `src/application/wallets/reconcile-wallet.ts` |
 | Inbox na mesma transação do efeito, ack depois do commit | crash entre commit e ack vira duplicata reconhecida | inbox em transação separada: perderia a operação | `src/interfaces/messaging/wager-message-handler.ts` |
 | Erro permanente para a DLQ na hora, com o motivo | tentar de novo não muda o resultado e seguraria a wallet na FIFO | esperar a redrive policy | `src/interfaces/messaging/processing-failure.ts` |
 | Retry no processo só para contenção (`55P03`, `40P01`, `40001`) | resolve em milissegundos; sem ele, uma wallet disputada mandava mensagens não tentadas para a DLQ | retry no processo para todo transitório | `src/application/retry-on-contention.ts` |
@@ -46,7 +50,7 @@ HTTP POST /wagering/transactions        SQS wager-transactions.fifo
   201 / 200 / 202 / 422                    ack (DeleteMessage) só depois do COMMIT
 ```
 
-Camadas: `domain` (regras puras, só `decimal.js`) ← `application` (casos de uso e portas) ← `infrastructure` (MikroORM, SQS, config) e `interfaces` (HTTP e consumer SQS). A ligação entre portas e adaptadores fica em `src/wagering.module.ts` e `src/wager-consumer.module.ts`.
+Camadas: `domain` (regras puras, só `decimal.js`) ← `application` (casos de uso e portas) ← `infrastructure` (MikroORM, SQS, config) e `interfaces` (HTTP, consumer SQS e os loops do publisher e do worker). A ligação entre portas e adaptadores fica em `src/wagering.module.ts`, `src/wager-consumer.module.ts` e `src/background-workers.module.ts`.
 
 ## 3. Os pontos avaliados
 
@@ -72,7 +76,8 @@ Camadas: `domain` (regras puras, só `decimal.js`) ← `application` (casos de u
 - `wallet.debit()` e `wallet.credit()` devolvem o lançamento que produzem; não há como mudar o saldo sem ledger.
 - No banco, cada lançamento guarda `wallet_version` e começa onde o anterior terminou (trigger de cadeia, `UNIQUE (wallet_id, wallet_version)`). No COMMIT, constraint triggers diferidas exigem saldo e versão iguais aos do último lançamento. Ledger e transação terminal são imutáveis (triggers).
 - O que fica só no domínio, por escolha: direção do lançamento por tipo e lançamento apenas de transação processada. Levar isso ao banco duplicaria a regra em PL/pgSQL.
-- Prova: `test/integration/schema` tenta violar cada garantia com SQL direto; todo teste que movimenta uma wallet termina com saldo igual ao ledger reconstruído.
+- `POST /wallets/:id/reconciliation` compara saldo e créditos menos débitos numa só instrução (um snapshot, sem lock). Divergência: log `wallet.reconciliation_divergence`, métrica e `consistent: false`; nada é corrigido. `GET /wallets/:id/ledger` pagina por cursor de `wallet_version`.
+- Prova: `test/integration/schema` tenta violar cada garantia com SQL direto; todo teste que movimenta uma wallet termina com saldo igual ao ledger reconstruído; `reconciliation.test.ts` corrompe o saldo com os triggers desligados só naquela sessão.
 
 ### Processamento assíncrono e recuperação de falhas
 - Consumer dentro do processo da API (`SQS_CONSUMER_ENABLED`), mesmo caso de uso do HTTP. Wallets em paralelo, cada wallet em ordem (`MessageGroupId = walletId`).
@@ -80,7 +85,9 @@ Camadas: `domain` (regras puras, só `decimal.js`) ← `application` (casos de u
 - Negócio: ack. Contenção: até 3 tentativas no processo. Banco fora ou wallet ainda inexistente: `ChangeMessageVisibility` com backoff exponencial e jitter; a redrive policy (`maxReceiveCount` 10) leva à DLQ. Permanente (JSON, schema, contrato, conflitos, erro inesperado): DLQ na hora, com `reason` nos atributos.
 - `SIGTERM`: para de receber, espera o long poll (até 10 s), termina o que está em andamento e devolve o resto.
 - Eventos gravados na outbox na mesma transação (`WagerTransactionProcessed`, `WagerTransactionRejected`, `WalletBalanceChanged` só quando o saldo muda, `WagerTransactionPendingReference`), envelope com `eventType` e `version` por subclasse.
-- Prova: `test/integration/messaging`, com filas próprias por teste, processo filho morto com `SIGKILL` entre o commit e o ack, e `SIGTERM` no `src/main.ts` real.
+- Publisher em toda instância (`OUTBOX_PUBLISHER_ENABLED`): lease de 30 s com dono (`lease_token`), envio para `wagering-events.fifo` com `MessageGroupId` = wallet e `MessageDeduplicationId` = `eventId`, retry com backoff e jitter; a falha de um evento segura só a sua wallet. Reenvio depois de lease vencido é contado e descartado pela deduplicação.
+- Worker de `PENDING_REFERENCE` em toda instância: confere na hora e depois de 1, 2, 4 s... até 60 s, com jitter; na 15ª conferência com a referência inexistente, `REJECTED` com `REFERENCE_NOT_FOUND` e `WagerTransactionRejected`. Uma linha que falha, também no COMMIT, é pulada no lote e não trava as outras.
+- Prova: `test/integration/messaging`, com filas próprias por teste, processo filho morto com `SIGKILL` entre o commit e o ack e entre o claim e o envio, e `SIGTERM` no `src/main.ts` real.
 
 ## 4. Testes obrigatórios (seção 13)
 
@@ -90,15 +97,15 @@ Camadas: `domain` (regras puras, só `decimal.js`) ← `application` (casos de u
 | Migrations e constraints | ✅ | `test/integration/migrations.test.ts`, `test/integration/schema` |
 | Atomicidade wallet, ledger, inbox e outbox | ✅ | `atomicity-and-outbox.test.ts`, `consumer-processing.test.ts` |
 | Inbox e redelivery; retry e DLQ | ✅ | `test/integration/messaging` |
-| Publishers concorrentes na mesma outbox | ⏳ pendente | |
+| Publishers concorrentes na mesma outbox | ✅ | `outbox-publisher.test.ts`, `outbox-publisher-crash.test.ts` |
 | Recuperação após reinicialização | ⏳ pendente | |
 | 1. Mesma aposta 50 vezes em paralelo | ✅ | `concurrency.test.ts` |
 | 2. Disputa de saldo (2 × 80) | ✅ | `concurrency.test.ts`, `wallet-lock-order.schema.test.ts` |
 | 3. Wallets distintas em paralelo | ✅ | `concurrency.test.ts`, `consumer-message-groups.test.ts` |
 | 4. Três ou mais processos simultâneos | ⏳ pendente | |
 | 5. Worker morto depois do commit e antes do ack | ✅ | `consumer-crash-before-ack.test.ts` |
-| 6. Dois publishers na mesma outbox | ⏳ pendente | |
-| 7. REFUND ou ROLLBACK antes da referência | 🟨 grava `PENDING_REFERENCE`; worker pendente | `http-status-mapping.test.ts` |
+| 6. Dois publishers na mesma outbox | ✅ | `outbox-publisher.test.ts` |
+| 7. REFUND ou ROLLBACK antes da referência | ✅ | `pending-reference-worker.test.ts`, `consumer-reference-before-bet.test.ts` |
 | 8. Reinício com consistência final | ⏳ pendente | |
 
 ## 5. Interpretações do enunciado
@@ -111,6 +118,7 @@ Camadas: `domain` (regras puras, só `decimal.js`) ← `application` (casos de u
 | Valor zero | só LOSS aceita; WIN zero é erro de contrato | operação que afeta saldo precisa movê-lo |
 | Crédito acima do limite da coluna | `BALANCE_LIMIT_EXCEEDED`, gravado | sem isso, `22003` e 500 sem resultado |
 | Referência existe mas não terminou | a dependente espera em `PENDING_REFERENCE` | rejeitar seria prematuro |
+| Referência não chega em 15 conferências (~4,5 a 9 min); se existe mas não terminou, a espera continua | `REJECTED` com `REFERENCE_NOT_FOUND` só quando ela não existe | rejeitar cedo perderia um REFUND; um ROLLBACK rejeitado enquanto o seu REFUND credita depois deixaria o crédito sem reversão |
 | Wallet inexistente | HTTP: `404`, nada gravado; SQS: transitório | a wallet pode ser criada pelo HTTP logo depois |
 | Fila de eventos | `wagering-events.fifo` | o enunciado só nomeia a de entrada e a DLQ |
 
@@ -133,7 +141,8 @@ Autenticação: `ProviderAuthGuard` chama a porta `ProviderIdentityPort`, hoje u
 
 ## 7. Limitações
 
-- O worker que publica a outbox no SQS e o worker de `PENDING_REFERENCE` ainda não existem; a reconciliação e o ledger paginado também não.
+- Se o SQS recusasse para sempre um evento, a wallet dele pararia de publicar (as outras seguem). Isso aparece nos logs `outbox.publish_failed` e `outbox.wallet_stalled` (a partir de 10 tentativas); as métricas ainda ficam só em memória.
+- Os eventos gerados pelo worker de `PENDING_REFERENCE` usam o id da transação como `correlationId`: o da requisição original não é gravado.
 - Nenhuma transação é gravada como `FAILED`: gravar exigiria uma segunda transação depois do rollback e congelaria a chave num possível bug. A DLQ, com o motivo, é o registro auditável.
 - O reprocessamento da DLQ é manual (README). As métricas ficam em memória e ainda não são expostas.
 - A tabela ISO 4217 vem dos dados ICU do runtime e pode mudar com a versão (a CI fixa o Bun). Em produção seria um catálogo próprio.

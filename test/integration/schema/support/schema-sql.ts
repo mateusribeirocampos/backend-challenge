@@ -17,6 +17,8 @@ export const SqlState = {
   ForeignKeyViolation: '23503',
   RestrictViolation: '23001',
   DeadlockDetected: '40P01',
+  /** A value given for a GENERATED ALWAYS identity column. */
+  GeneratedAlways: '428C9',
 } as const;
 
 /** Opens the ORM on wagering_test and applies pending migrations (no-op when already migrated). */

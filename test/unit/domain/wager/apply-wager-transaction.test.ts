@@ -455,6 +455,63 @@ describe('reference out of order (spec 13, concurrency item 7, at the domain lev
   });
 });
 
+describe('the last reference check of the PENDING_REFERENCE worker (ADR-008)', () => {
+  test('the reference never arrived: REJECTED with REFERENCE_NOT_FOUND, balance unchanged, no ledger entry', () => {
+    const scenario = scenarioWith('100.00');
+    const refund = scenario.play({ kind: 'REFUND', money: brl('25.00'), externalTransactionId: 'r1', referenceExternalTransactionId: 'b1' });
+
+    const outcome = scenario.apply(refund.transaction, { lastReferenceCheck: true });
+
+    expectRejected(outcome, FailureCode.ReferenceNotFound, '100.00');
+    expect(refund.transaction.status).toBe('REJECTED');
+    expect(refund.transaction.referenceTransactionId).toBeUndefined();
+    expect(scenario.ledger).toHaveLength(0);
+    scenario.assertBalanceMatchesLedger();
+  });
+
+  test('the reference exists but has not finished: it keeps waiting, even past the last check', () => {
+    const scenario = scenarioWith('100.00');
+    const bet = scenario.add({ kind: 'BET', money: brl('25.00'), externalTransactionId: 'b1' });
+    bet.markPendingReference(AT);
+    const refund = scenario.play({ kind: 'REFUND', money: brl('25.00'), externalTransactionId: 'r1', referenceExternalTransactionId: 'b1' });
+
+    expect(scenario.apply(refund.transaction, { lastReferenceCheck: true })).toEqual({ status: 'PENDING_REFERENCE' });
+    expect(refund.transaction.status).toBe('PENDING_REFERENCE');
+  });
+
+  test('...and when that reference ends REJECTED, the waiting one is REJECTED with REFERENCE_NOT_PROCESSED', () => {
+    const scenario = scenarioWith('100.00');
+    const refund = scenario.add({ kind: 'REFUND', money: brl('25.00'), externalTransactionId: 'r1', referenceExternalTransactionId: 'b1' });
+    refund.markPendingReference(AT);
+    const rollback = scenario.play({ kind: 'ROLLBACK', money: brl('25.00'), externalTransactionId: 'rb1', referenceExternalTransactionId: 'r1' });
+    expect(scenario.apply(rollback.transaction, { lastReferenceCheck: true })).toEqual({ status: 'PENDING_REFERENCE' });
+
+    // The REFUND's own wait ends: its BET never came.
+    expectRejected(scenario.apply(refund, { lastReferenceCheck: true }), FailureCode.ReferenceNotFound, '100.00');
+
+    expectRejected(scenario.apply(rollback.transaction, { lastReferenceCheck: true }), FailureCode.ReferenceNotProcessed, '100.00');
+    scenario.assertBalanceMatchesLedger();
+  });
+
+  test('on the last check a reference that is there is applied normally: the flag only ends a wait', () => {
+    const scenario = scenarioWith('100.00');
+    const refund = scenario.play({ kind: 'REFUND', money: brl('25.00'), externalTransactionId: 'r1', referenceExternalTransactionId: 'b1' });
+    scenario.play({ kind: 'BET', money: brl('25.00'), externalTransactionId: 'b1' });
+
+    expectProcessed(scenario.apply(refund.transaction, { lastReferenceCheck: true }), '100.00');
+    scenario.assertBalanceMatchesLedger();
+  });
+
+  test('a rule broken by the payload is still reported as such on the last check', () => {
+    const scenario = scenarioWith('100.00');
+    scenario.play({ kind: 'BET', money: brl('25.00'), externalTransactionId: 'b1' });
+
+    const { transaction } = scenario.play({ kind: 'REFUND', money: brl('30.00'), externalTransactionId: 'r1', referenceExternalTransactionId: 'b1' });
+
+    expect(transaction.failureCode).toBe(FailureCode.AmountMismatch);
+  });
+});
+
 describe('wallet checks', () => {
   test('currency different from the wallet: CURRENCY_MISMATCH, balance shown in the wallet currency', () => {
     const scenario = scenarioWith('100.00');

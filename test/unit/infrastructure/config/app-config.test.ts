@@ -41,6 +41,7 @@ describe('loadConfig', () => {
       credentials: { accessKeyId: 'test', secretAccessKey: 'test' },
       wagerQueueName: 'wager-transactions.fifo',
       wagerDeadLetterQueueName: 'wager-transactions-dlq.fifo',
+      eventsQueueName: 'wagering-events.fifo',
       consumer: {
         enabled: true,
         visibilityTimeoutSeconds: 30,
@@ -171,6 +172,92 @@ describe('loadConfig: SUPPORTED_CURRENCIES', () => {
   test.each(['ABC', 'XXX', 'brl', 'BRL,,USD'])('refuses %p: every entry must be an ISO-4217 currency code', (value) => {
     expect(problemsFor({ ...validEnv, SUPPORTED_CURRENCIES: value })).toEqual([
       expect.stringContaining('SUPPORTED_CURRENCIES:'),
+    ]);
+  });
+});
+
+describe('loadConfig: outbox publisher', () => {
+  test('on by default, 20 events per batch, 30 s lease, 5 s send timeout, 500 ms pause', () => {
+    expect(loadConfig(validEnv).outboxPublisher).toEqual({
+      enabled: true,
+      batchSize: 20,
+      leaseSeconds: 30,
+      sendTimeoutMs: 5_000,
+      pollIntervalMs: 500,
+    });
+  });
+
+  test('reads every setting and the events queue name', () => {
+    const config = loadConfig({
+      ...validEnv,
+      SQS_EVENTS_QUEUE_NAME: 'other-events.fifo',
+      OUTBOX_PUBLISHER_ENABLED: 'false',
+      OUTBOX_PUBLISHER_BATCH_SIZE: '5',
+      OUTBOX_PUBLISHER_LEASE_SECONDS: '2',
+      OUTBOX_PUBLISHER_SEND_TIMEOUT_MS: '1000',
+      OUTBOX_PUBLISHER_POLL_INTERVAL_MS: '20',
+    });
+
+    expect(config.sqs.eventsQueueName).toBe('other-events.fifo');
+    expect(config.outboxPublisher).toEqual({
+      enabled: false,
+      batchSize: 5,
+      leaseSeconds: 2,
+      sendTimeoutMs: 1_000,
+      pollIntervalMs: 20,
+    });
+  });
+
+  test('the lease must outlast one send: otherwise another instance could send while this one still is', () => {
+    expect(problemsFor({ ...validEnv, OUTBOX_PUBLISHER_LEASE_SECONDS: '5', OUTBOX_PUBLISHER_SEND_TIMEOUT_MS: '5000' })).toEqual([
+      'OUTBOX_PUBLISHER_LEASE_SECONDS: must be longer than OUTBOX_PUBLISHER_SEND_TIMEOUT_MS (a send must end while the lease holds)',
+    ]);
+  });
+
+  test('refuses an empty batch and an events queue that is not FIFO', () => {
+    expect(problemsFor({ ...validEnv, OUTBOX_PUBLISHER_BATCH_SIZE: '0', SQS_EVENTS_QUEUE_NAME: 'events' })).toEqual([
+      'SQS_EVENTS_QUEUE_NAME: must be a FIFO queue name ending in .fifo',
+      'OUTBOX_PUBLISHER_BATCH_SIZE: must be an integer between 1 and 100',
+    ]);
+  });
+});
+
+describe('loadConfig: PENDING_REFERENCE worker', () => {
+  test('on by default: 15 checks, 1 s base, 60 s ceiling (a window of about 4.5 to 9 minutes)', () => {
+    expect(loadConfig(validEnv).pendingReferenceWorker).toEqual({
+      enabled: true,
+      maxAttempts: 15,
+      baseDelayMs: 1_000,
+      maxDelayMs: 60_000,
+      batchSize: 20,
+      pollIntervalMs: 500,
+    });
+  });
+
+  test('reads every setting', () => {
+    const config = loadConfig({
+      ...validEnv,
+      PENDING_REFERENCE_WORKER_ENABLED: 'false',
+      PENDING_REFERENCE_MAX_ATTEMPTS: '3',
+      PENDING_REFERENCE_BASE_DELAY_MS: '20',
+      PENDING_REFERENCE_MAX_DELAY_MS: '40',
+      PENDING_REFERENCE_BATCH_SIZE: '5',
+      PENDING_REFERENCE_POLL_INTERVAL_MS: '10',
+    });
+
+    expect(config.pendingReferenceWorker).toEqual({
+      enabled: false,
+      maxAttempts: 3,
+      baseDelayMs: 20,
+      maxDelayMs: 40,
+      batchSize: 5,
+      pollIntervalMs: 10,
+    });
+  });
+
+  test('the ceiling cannot be below the base delay', () => {
+    expect(problemsFor({ ...validEnv, PENDING_REFERENCE_BASE_DELAY_MS: '5000', PENDING_REFERENCE_MAX_DELAY_MS: '1000' })).toEqual([
+      'PENDING_REFERENCE_MAX_DELAY_MS: must be at least PENDING_REFERENCE_BASE_DELAY_MS',
     ]);
   });
 });

@@ -12,6 +12,8 @@ export interface AppConfig {
   readonly wallets: { readonly supportedCurrencies: readonly string[] };
   readonly database: DatabaseConfig;
   readonly sqs: SqsConfig;
+  readonly outboxPublisher: OutboxPublisherConfig;
+  readonly pendingReferenceWorker: PendingReferenceWorkerConfig;
 }
 
 export interface DatabaseConfig {
@@ -31,6 +33,8 @@ export interface SqsConfig {
   readonly wagerQueueName: string;
   /** Where the consumer sends permanent failures; the redrive policy of the queue points here too. */
   readonly wagerDeadLetterQueueName: string;
+  /** Where the outbox publisher sends the integration events. */
+  readonly eventsQueueName: string;
   readonly consumer: WagerConsumerConfig;
 }
 
@@ -51,6 +55,35 @@ export interface WagerConsumerConfig {
   /** Backoff of a transient failure: delay = jitter(min(max, base * 2^(receiveCount - 1))). */
   readonly retryBaseDelaySeconds: number;
   readonly retryMaxDelaySeconds: number;
+}
+
+/** The outbox publisher (spec 11, ADR-005), a loop inside every app instance. */
+export interface OutboxPublisherConfig {
+  /** false: this instance does not publish. The integration tests start their publishers explicitly. */
+  readonly enabled: boolean;
+  /** Events claimed per batch. */
+  readonly batchSize: number;
+  /** How long a claim reserves its events; after it, another instance may send them. */
+  readonly leaseSeconds: number;
+  /** A SendMessage that takes longer is given up and retried. Shorter than the lease. */
+  readonly sendTimeoutMs: number;
+  /** Pause when there was nothing (more) to publish. */
+  readonly pollIntervalMs: number;
+}
+
+/** The PENDING_REFERENCE worker (spec 7.1, ADR-008), a loop inside every app instance. */
+export interface PendingReferenceWorkerConfig {
+  /** false: this instance does not check pending references. The integration tests start theirs explicitly. */
+  readonly enabled: boolean;
+  /** Checks before giving up with REFERENCE_NOT_FOUND (only when the reference does not exist). */
+  readonly maxAttempts: number;
+  /** Backoff between checks: min(maxDelayMs, baseDelayMs * 2^(n-1)), with jitter. */
+  readonly baseDelayMs: number;
+  readonly maxDelayMs: number;
+  /** Pending transactions checked per run. */
+  readonly batchSize: number;
+  /** Pause when nothing (more) was due. */
+  readonly pollIntervalMs: number;
 }
 
 export const APP_CONFIG = Symbol('APP_CONFIG');
@@ -111,6 +144,18 @@ const envSchema = z
     SQS_CONSUMER_RETRY_BASE_SECONDS: integerBetween(1, 3600).default(5),
     SQS_CONSUMER_RETRY_MAX_SECONDS: integerBetween(1, 43_200).default(300),
     SUPPORTED_CURRENCIES: currencyList.default(['BRL']),
+    SQS_EVENTS_QUEUE_NAME: fifoQueueName.default('wagering-events.fifo'),
+    OUTBOX_PUBLISHER_ENABLED: booleanFlag.default(true),
+    OUTBOX_PUBLISHER_BATCH_SIZE: integerBetween(1, 100).default(20),
+    OUTBOX_PUBLISHER_LEASE_SECONDS: integerBetween(1, 3600).default(30),
+    OUTBOX_PUBLISHER_SEND_TIMEOUT_MS: integerBetween(100, 60_000).default(5_000),
+    OUTBOX_PUBLISHER_POLL_INTERVAL_MS: integerBetween(10, 60_000).default(500),
+    PENDING_REFERENCE_WORKER_ENABLED: booleanFlag.default(true),
+    PENDING_REFERENCE_MAX_ATTEMPTS: integerBetween(1, 100).default(15),
+    PENDING_REFERENCE_BASE_DELAY_MS: integerBetween(1, 3_600_000).default(1_000),
+    PENDING_REFERENCE_MAX_DELAY_MS: integerBetween(1, 3_600_000).default(60_000),
+    PENDING_REFERENCE_BATCH_SIZE: integerBetween(1, 100).default(20),
+    PENDING_REFERENCE_POLL_INTERVAL_MS: integerBetween(10, 60_000).default(500),
   })
   .refine((env) => (env.AWS_ACCESS_KEY_ID === undefined) === (env.AWS_SECRET_ACCESS_KEY === undefined), {
     message: 'AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY must be set together or both left empty',
@@ -119,6 +164,14 @@ const envSchema = z
   .refine((env) => env.SQS_CONSUMER_SHUTDOWN_TIMEOUT_SECONDS > env.SQS_CONSUMER_WAIT_TIME_SECONDS, {
     message: 'must be greater than SQS_CONSUMER_WAIT_TIME_SECONDS (stop waits for the long poll to return)',
     path: ['SQS_CONSUMER_SHUTDOWN_TIMEOUT_SECONDS'],
+  })
+  .refine((env) => env.OUTBOX_PUBLISHER_LEASE_SECONDS * 1000 > env.OUTBOX_PUBLISHER_SEND_TIMEOUT_MS, {
+    message: 'must be longer than OUTBOX_PUBLISHER_SEND_TIMEOUT_MS (a send must end while the lease holds)',
+    path: ['OUTBOX_PUBLISHER_LEASE_SECONDS'],
+  })
+  .refine((env) => env.PENDING_REFERENCE_MAX_DELAY_MS >= env.PENDING_REFERENCE_BASE_DELAY_MS, {
+    message: 'must be at least PENDING_REFERENCE_BASE_DELAY_MS',
+    path: ['PENDING_REFERENCE_MAX_DELAY_MS'],
   });
 
 type RawEnv = Readonly<Record<string, string | undefined>>;
@@ -150,6 +203,7 @@ export function loadConfig(rawEnv: RawEnv): AppConfig {
           : undefined,
       wagerQueueName: env.SQS_WAGER_QUEUE_NAME,
       wagerDeadLetterQueueName: env.SQS_WAGER_DLQ_NAME,
+      eventsQueueName: env.SQS_EVENTS_QUEUE_NAME,
       consumer: {
         enabled: env.SQS_CONSUMER_ENABLED,
         visibilityTimeoutSeconds: env.SQS_CONSUMER_VISIBILITY_TIMEOUT_SECONDS,
@@ -158,6 +212,21 @@ export function loadConfig(rawEnv: RawEnv): AppConfig {
         retryBaseDelaySeconds: env.SQS_CONSUMER_RETRY_BASE_SECONDS,
         retryMaxDelaySeconds: env.SQS_CONSUMER_RETRY_MAX_SECONDS,
       },
+    },
+    outboxPublisher: {
+      enabled: env.OUTBOX_PUBLISHER_ENABLED,
+      batchSize: env.OUTBOX_PUBLISHER_BATCH_SIZE,
+      leaseSeconds: env.OUTBOX_PUBLISHER_LEASE_SECONDS,
+      sendTimeoutMs: env.OUTBOX_PUBLISHER_SEND_TIMEOUT_MS,
+      pollIntervalMs: env.OUTBOX_PUBLISHER_POLL_INTERVAL_MS,
+    },
+    pendingReferenceWorker: {
+      enabled: env.PENDING_REFERENCE_WORKER_ENABLED,
+      maxAttempts: env.PENDING_REFERENCE_MAX_ATTEMPTS,
+      baseDelayMs: env.PENDING_REFERENCE_BASE_DELAY_MS,
+      maxDelayMs: env.PENDING_REFERENCE_MAX_DELAY_MS,
+      batchSize: env.PENDING_REFERENCE_BATCH_SIZE,
+      pollIntervalMs: env.PENDING_REFERENCE_POLL_INTERVAL_MS,
     },
   };
 }
