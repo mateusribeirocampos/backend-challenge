@@ -55,5 +55,7 @@ import { WalletsController } from './interfaces/http/wallets.controller.js';
     },
     ProviderAuthGuard,
   ],
+  // The SQS consumer runs the same use case as POST /wagering/transactions.
+  exports: [ProcessWagerTransaction],
 })
 export class WageringModule {}

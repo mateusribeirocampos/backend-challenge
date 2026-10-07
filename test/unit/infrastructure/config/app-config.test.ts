@@ -40,7 +40,66 @@ describe('loadConfig', () => {
       endpoint: 'http://localhost:4566',
       credentials: { accessKeyId: 'test', secretAccessKey: 'test' },
       wagerQueueName: 'wager-transactions.fifo',
+      wagerDeadLetterQueueName: 'wager-transactions-dlq.fifo',
+      consumer: {
+        enabled: true,
+        visibilityTimeoutSeconds: 30,
+        waitTimeSeconds: 10,
+        shutdownTimeoutSeconds: 15,
+        retryBaseDelaySeconds: 5,
+        retryMaxDelaySeconds: 300,
+      },
     });
+  });
+
+  test('reads the SQS consumer settings', () => {
+    const config = loadConfig({
+      ...validEnv,
+      SQS_WAGER_DLQ_NAME: 'other-dlq.fifo',
+      SQS_CONSUMER_ENABLED: 'false',
+      SQS_CONSUMER_VISIBILITY_TIMEOUT_SECONDS: '60',
+      SQS_CONSUMER_WAIT_TIME_SECONDS: '0',
+      SQS_CONSUMER_SHUTDOWN_TIMEOUT_SECONDS: '3',
+      SQS_CONSUMER_RETRY_BASE_SECONDS: '1',
+      SQS_CONSUMER_RETRY_MAX_SECONDS: '30',
+    });
+
+    expect(config.sqs.wagerDeadLetterQueueName).toBe('other-dlq.fifo');
+    expect(config.sqs.consumer).toEqual({
+      enabled: false,
+      visibilityTimeoutSeconds: 60,
+      waitTimeSeconds: 0,
+      shutdownTimeoutSeconds: 3,
+      retryBaseDelaySeconds: 1,
+      retryMaxDelaySeconds: 30,
+    });
+  });
+
+  test('refuses consumer settings SQS would refuse, or that make no sense', () => {
+    expect(
+      problemsFor({
+        ...validEnv,
+        SQS_WAGER_DLQ_NAME: 'dlq',
+        SQS_CONSUMER_ENABLED: 'yes',
+        SQS_CONSUMER_VISIBILITY_TIMEOUT_SECONDS: '0',
+        SQS_CONSUMER_WAIT_TIME_SECONDS: '21',
+        SQS_CONSUMER_SHUTDOWN_TIMEOUT_SECONDS: '301',
+      }),
+    ).toEqual([
+      'SQS_WAGER_DLQ_NAME: must be a FIFO queue name ending in .fifo',
+      'SQS_CONSUMER_ENABLED: must be true or false',
+      'SQS_CONSUMER_VISIBILITY_TIMEOUT_SECONDS: must be an integer between 1 and 43200',
+      'SQS_CONSUMER_WAIT_TIME_SECONDS: must be an integer between 0 and 20',
+      'SQS_CONSUMER_SHUTDOWN_TIMEOUT_SECONDS: must be an integer between 1 and 300',
+    ]);
+  });
+
+  test('the shutdown budget must be longer than one long poll: stop waits for the poll to return', () => {
+    expect(
+      problemsFor({ ...validEnv, SQS_CONSUMER_WAIT_TIME_SECONDS: '10', SQS_CONSUMER_SHUTDOWN_TIMEOUT_SECONDS: '10' }),
+    ).toEqual([
+      'SQS_CONSUMER_SHUTDOWN_TIMEOUT_SECONDS: must be greater than SQS_CONSUMER_WAIT_TIME_SECONDS (stop waits for the long poll to return)',
+    ]);
   });
 
   test('converts numeric env strings to numbers', () => {

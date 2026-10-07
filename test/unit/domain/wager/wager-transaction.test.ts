@@ -171,6 +171,54 @@ describe('idempotency key namespace: the key must start with "{providerId}:"', (
   });
 });
 
+describe('control characters: refused in every text field, whatever the entry point (HTTP or SQS)', () => {
+  const base = submitProps({ kind: WagerTransactionKind.Win, money: brl('1.00'), externalTransactionId: 'c1' });
+  type TextField = keyof Pick<
+    CreateWagerTransactionProps,
+    | 'providerId'
+    | 'externalTransactionId'
+    | 'idempotencyKey'
+    | 'walletId'
+    | 'playerId'
+    | 'roundId'
+    | 'gameId'
+    | 'referenceExternalTransactionId'
+  >;
+  const textFields: TextField[] = [
+    'providerId',
+    'externalTransactionId',
+    'idempotencyKey',
+    'walletId',
+    'playerId',
+    'roundId',
+    'gameId',
+    'referenceExternalTransactionId',
+  ];
+
+  // U+0000 (NUL: PostgreSQL answers 08P01), U+0007 (stored silently before), U+001F and U+007F (the range limits).
+  for (const character of ['\u0000', '\u0007', '\u001F', '\u007F']) {
+    const visible = `U+${character.charCodeAt(0).toString(16).toUpperCase().padStart(4, '0')}`;
+
+    test.each(textFields)(`%s with ${visible} is INVALID_FORMAT and names the field`, (field) => {
+      const props: CreateWagerTransactionProps = { ...base, referenceExternalTransactionId: 'b1' };
+      const value = `${props[field] ?? ''}${character}x`;
+      // The key keeps its namespace, so only the control character can be the reason.
+      const tampered = field === 'providerId' ? { providerId: value, idempotencyKey: `${value}:c1` } : { [field]: value };
+
+      const error = createError({ ...props, ...tampered });
+
+      expect(error.code).toBe(ContractViolationCode.InvalidFormat);
+      expect(error.message).toContain(field);
+    });
+  }
+
+  test('ordinary punctuation, accents and spaces inside a value are still accepted', () => {
+    const transaction = WagerTransaction.create({ ...base, roundId: 'rodada 7: ação/ñ #1', gameId: 'fortune chimp ü' });
+
+    expect(transaction.roundId).toBe('rodada 7: ação/ñ #1');
+  });
+});
+
 describe('WagerTransaction.createOpening', () => {
   test('is born PROCESSED under provider "internal" with a key derived from the wallet', () => {
     const opening = WagerTransaction.createOpening({

@@ -5,7 +5,10 @@ import {
   DeadlockException,
   UniqueConstraintViolationException,
 } from '@mikro-orm/core';
-import { isTransientDatabaseError } from '../../../../src/infrastructure/persistence/database-error-classifier.js';
+import {
+  isLockContentionError,
+  isTransientDatabaseError,
+} from '../../../../src/infrastructure/persistence/database-error-classifier.js';
 
 /** A driver error as the pg client raises it: a SQLSTATE (or a Node errno code) in `code`. */
 function driverError(code: string, message = 'driver error'): Error & { code: string } {
@@ -58,5 +61,34 @@ describe('isTransientDatabaseError: "retry with the same key" vs "do not retry"'
     expect(isTransientDatabaseError(new TypeError('x is undefined'))).toBe(false);
     expect(isTransientDatabaseError('a string')).toBe(false);
     expect(isTransientDatabaseError(undefined)).toBe(false);
+  });
+});
+
+describe('isLockContentionError: transient AND worth retrying right away, in the same process', () => {
+  test.each([
+    ['55P03 lock_not_available (lock_timeout)', '55P03'],
+    ['40P01 deadlock_detected', '40P01'],
+    ['40001 serialization_failure', '40001'],
+  ])('contention: %s', (_name, code) => {
+    expect(isLockContentionError(driverError(code))).toBe(true);
+  });
+
+  test('MikroORM wrappers of a deadlock count too', () => {
+    expect(isLockContentionError(new DeadlockException(driverError('40P01')))).toBe(true);
+  });
+
+  test.each([
+    ['ECONNREFUSED (database down: retrying in milliseconds does not help)', 'ECONNREFUSED'],
+    ['57P03 cannot_connect_now', '57P03'],
+    ['08006 connection_failure', '08006'],
+    ['23505 unique_violation', '23505'],
+    ['08P01 protocol_violation', '08P01'],
+  ])('not contention: %s', (_name, code) => {
+    expect(isLockContentionError(driverError(code))).toBe(false);
+  });
+
+  test('a connection error without code is not contention', () => {
+    expect(isLockContentionError(new ConnectionException(driverError('XX000')))).toBe(false);
+    expect(isLockContentionError(new Error('Connection terminated unexpectedly'))).toBe(false);
   });
 });

@@ -1,9 +1,10 @@
 import { IsolationLevel } from '@mikro-orm/core';
 import type { EntityManager, MikroORM } from '@mikro-orm/postgresql';
-import { TransientInfrastructureError } from '../../application/errors.js';
+import { LockContentionError, TransientInfrastructureError } from '../../application/errors.js';
 import type { Repositories } from '../../application/ports/repositories.js';
 import type { TransactionRunner } from '../../application/ports/transaction-runner.js';
-import { isTransientDatabaseError } from './database-error-classifier.js';
+import { isLockContentionError, isTransientDatabaseError } from './database-error-classifier.js';
+import { MikroOrmInboxRepository } from './repositories/mikro-orm-inbox.repository.js';
 import { MikroOrmLedgerRepository } from './repositories/mikro-orm-ledger.repository.js';
 import { MikroOrmOutboxRepository } from './repositories/mikro-orm-outbox.repository.js';
 import { MikroOrmWagerTransactionRepository } from './repositories/mikro-orm-wager-transaction.repository.js';
@@ -37,6 +38,10 @@ export class MikroOrmTransactionRunner implements TransactionRunner {
         { isolationLevel: IsolationLevel.READ_COMMITTED },
       );
     } catch (error) {
+      if (isLockContentionError(error)) {
+        // Still a TransientInfrastructureError (HTTP 503), but the SQS consumer retries it in process first.
+        throw new LockContentionError('Another transaction held the row, retry with the same key', { cause: error });
+      }
       if (isTransientDatabaseError(error)) {
         throw new TransientInfrastructureError('Database temporarily unavailable, retry with the same key', {
           cause: error,
@@ -53,5 +58,6 @@ function repositoriesFor(em: EntityManager): Repositories {
     transactions: new MikroOrmWagerTransactionRepository(em),
     ledger: new MikroOrmLedgerRepository(em),
     outbox: new MikroOrmOutboxRepository(em),
+    inbox: new MikroOrmInboxRepository(em),
   };
 }

@@ -1,3 +1,4 @@
+import type { InboxMessage } from '../../domain/inbox/inbox-message.js';
 import type { OutboxMessage } from '../../domain/outbox/outbox-message.js';
 import type { WagerTransaction } from '../../domain/wager/wager-transaction.js';
 import type { Wallet } from '../../domain/wallet/wallet.js';
@@ -13,6 +14,7 @@ export interface Repositories {
   readonly transactions: WagerTransactionRepository;
   readonly ledger: LedgerRepository;
   readonly outbox: OutboxRepository;
+  readonly inbox: InboxRepository;
 }
 
 export interface WalletRepository {
@@ -56,4 +58,16 @@ export interface LedgerRepository {
 
 export interface OutboxRepository {
   add(messages: readonly OutboxMessage[]): Promise<void>;
+}
+
+export interface InboxRepository {
+  /**
+   * Inserts the row unless (consumerName, messageId) already exists (ADR-005).
+   * true = first time this consumer handles the message. If another transaction is
+   * inserting the same pair, this call waits for it to finish first.
+   */
+  insertIfAbsent(message: InboxMessage): Promise<boolean>;
+  find(consumerName: string, messageId: string): Promise<InboxMessage | undefined>;
+  /** Writes processedAt. The row must exist and not be processed yet. */
+  saveProcessed(message: InboxMessage): Promise<void>;
 }

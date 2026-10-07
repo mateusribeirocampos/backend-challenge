@@ -26,6 +26,28 @@ export interface SqsConfig {
   /** Undefined means the AWS SDK default chain (IAM role, profile, ...). */
   readonly credentials: { readonly accessKeyId: string; readonly secretAccessKey: string } | undefined;
   readonly wagerQueueName: string;
+  /** Where the consumer sends permanent failures; the redrive policy of the queue points here too. */
+  readonly wagerDeadLetterQueueName: string;
+  readonly consumer: WagerConsumerConfig;
+}
+
+/** The SQS consumer of wager-transactions.fifo (spec 10). */
+export interface WagerConsumerConfig {
+  /** false: the app serves HTTP only. The integration tests start their consumers explicitly. */
+  readonly enabled: boolean;
+  /** How long a received message stays hidden from other consumers while it is processed. */
+  readonly visibilityTimeoutSeconds: number;
+  /** Long polling: how long one ReceiveMessage waits for messages (SQS allows 0 to 20). */
+  readonly waitTimeSeconds: number;
+  /**
+   * On SIGTERM, how long to wait for the long poll in progress and the messages already
+   * being processed. Longer than waitTimeSeconds, and shorter than the time the container
+   * gets before SIGKILL (stop_grace_period in docker-compose.yml).
+   */
+  readonly shutdownTimeoutSeconds: number;
+  /** Backoff of a transient failure: delay = jitter(min(max, base * 2^(receiveCount - 1))). */
+  readonly retryBaseDelaySeconds: number;
+  readonly retryMaxDelaySeconds: number;
 }
 
 export const APP_CONFIG = Symbol('APP_CONFIG');
@@ -40,6 +62,13 @@ export class ConfigValidationError extends Error {
 const requiredText = z.string('is required').trim().min(1, 'is required');
 const PORT_MESSAGE = 'must be an integer between 1 and 65535';
 const portNumber = z.coerce.number(PORT_MESSAGE).int(PORT_MESSAGE).min(1, PORT_MESSAGE).max(65535, PORT_MESSAGE);
+const fifoQueueName = requiredText.endsWith('.fifo', 'must be a FIFO queue name ending in .fifo');
+const booleanFlag = z.enum(['true', 'false'], 'must be true or false').transform((value) => value === 'true');
+
+function integerBetween(min: number, max: number) {
+  const message = `must be an integer between ${min} and ${max}`;
+  return z.coerce.number(message).int(message).min(min, message).max(max, message);
+}
 
 const envSchema = z
   .object({
@@ -53,11 +82,22 @@ const envSchema = z
     AWS_ACCESS_KEY_ID: z.string().trim().min(1).optional(),
     AWS_SECRET_ACCESS_KEY: z.string().trim().min(1).optional(),
     SQS_ENDPOINT: z.url('must be a URL like http://localhost:4566').optional(),
-    SQS_WAGER_QUEUE_NAME: requiredText.endsWith('.fifo', 'must be a FIFO queue name ending in .fifo'),
+    SQS_WAGER_QUEUE_NAME: fifoQueueName,
+    SQS_WAGER_DLQ_NAME: fifoQueueName.default('wager-transactions-dlq.fifo'),
+    SQS_CONSUMER_ENABLED: booleanFlag.default(true),
+    SQS_CONSUMER_VISIBILITY_TIMEOUT_SECONDS: integerBetween(1, 43_200).default(30),
+    SQS_CONSUMER_WAIT_TIME_SECONDS: integerBetween(0, 20).default(10),
+    SQS_CONSUMER_SHUTDOWN_TIMEOUT_SECONDS: integerBetween(1, 300).default(15),
+    SQS_CONSUMER_RETRY_BASE_SECONDS: integerBetween(1, 3600).default(5),
+    SQS_CONSUMER_RETRY_MAX_SECONDS: integerBetween(1, 43_200).default(300),
   })
   .refine((env) => (env.AWS_ACCESS_KEY_ID === undefined) === (env.AWS_SECRET_ACCESS_KEY === undefined), {
     message: 'AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY must be set together or both left empty',
     path: ['AWS_ACCESS_KEY_ID'],
+  })
+  .refine((env) => env.SQS_CONSUMER_SHUTDOWN_TIMEOUT_SECONDS > env.SQS_CONSUMER_WAIT_TIME_SECONDS, {
+    message: 'must be greater than SQS_CONSUMER_WAIT_TIME_SECONDS (stop waits for the long poll to return)',
+    path: ['SQS_CONSUMER_SHUTDOWN_TIMEOUT_SECONDS'],
   });
 
 type RawEnv = Readonly<Record<string, string | undefined>>;
@@ -87,6 +127,15 @@ export function loadConfig(rawEnv: RawEnv): AppConfig {
           ? { accessKeyId: env.AWS_ACCESS_KEY_ID, secretAccessKey: env.AWS_SECRET_ACCESS_KEY }
           : undefined,
       wagerQueueName: env.SQS_WAGER_QUEUE_NAME,
+      wagerDeadLetterQueueName: env.SQS_WAGER_DLQ_NAME,
+      consumer: {
+        enabled: env.SQS_CONSUMER_ENABLED,
+        visibilityTimeoutSeconds: env.SQS_CONSUMER_VISIBILITY_TIMEOUT_SECONDS,
+        waitTimeSeconds: env.SQS_CONSUMER_WAIT_TIME_SECONDS,
+        shutdownTimeoutSeconds: env.SQS_CONSUMER_SHUTDOWN_TIMEOUT_SECONDS,
+        retryBaseDelaySeconds: env.SQS_CONSUMER_RETRY_BASE_SECONDS,
+        retryMaxDelaySeconds: env.SQS_CONSUMER_RETRY_MAX_SECONDS,
+      },
     },
   };
 }

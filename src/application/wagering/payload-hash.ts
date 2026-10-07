@@ -40,7 +40,12 @@ export function computePayloadHash(payload: WagerPayload): string {
     money: Money.from(payload.money).toJSON(),
     referenceExternalTransactionId: payload.referenceExternalTransactionId ?? undefined,
   };
-  return createHash('sha256').update(canonicalJson(businessFields), 'utf8').digest('hex');
+  return sha256OfCanonicalJson(businessFields);
+}
+
+/** sha256, in hex, of canonicalJson(value). */
+export function sha256OfCanonicalJson(value: unknown): string {
+  return createHash('sha256').update(canonicalJson(value), 'utf8').digest('hex');
 }
 
 /** JSON with object keys sorted at every level and no whitespace. Arrays keep their order. */

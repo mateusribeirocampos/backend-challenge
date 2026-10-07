@@ -28,6 +28,25 @@ const TRANSIENT_NETWORK_CODES = new Set(['ECONNREFUSED', 'ECONNRESET', 'ETIMEDOU
 /** pg raises these without a code when the connection drops in the middle of a query. */
 const CONNECTION_LOST_MESSAGES = ['Connection terminated', 'connection timeout', 'timeout exceeded when trying to connect'];
 
+/**
+ * Contention, not unavailability: the database answered, another transaction held the
+ * row. A retry a few milliseconds later usually wins. A refused connection is NOT here:
+ * retrying it in milliseconds only adds load to a database that is down.
+ */
+const LOCK_CONTENTION_SQLSTATES = new Set([
+  '55P03', // lock_not_available
+  '40P01', // deadlock_detected
+  '40001', // serialization_failure
+]);
+
+export function isLockContentionError(error: unknown): boolean {
+  if (!(error instanceof Error)) {
+    return false;
+  }
+  const code = (error as { code?: unknown }).code;
+  return typeof code === 'string' && LOCK_CONTENTION_SQLSTATES.has(code);
+}
+
 export function isTransientDatabaseError(error: unknown): boolean {
   if (!(error instanceof Error)) {
     return false;
