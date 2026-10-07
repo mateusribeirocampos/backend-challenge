@@ -1,6 +1,6 @@
 /**
  * Errors of the application layer. Each one has a stable code: the HTTP layer maps
- * it to a status (ADR-007) and the SQS consumer will map it to ack, retry or DLQ.
+ * it to a status (ADR-007) and the SQS consumer maps it to ack, retry or DLQ.
  * Business rejections are NOT errors: they are stored results (REJECTED + failureCode).
  */
 export abstract class ApplicationError extends Error {
@@ -16,6 +16,14 @@ export abstract class ApplicationError extends Error {
 export class TransientInfrastructureError extends ApplicationError {
   readonly code = 'TRANSIENT_FAILURE';
 }
+
+/**
+ * The transient failure was contention on a row (lock timeout 55P03, deadlock 40P01,
+ * serialization 40001): the database is up and another transaction was in the way. Worth
+ * retrying in a few milliseconds, in the same process. Same code as its parent, so HTTP
+ * still answers 503 TRANSIENT_FAILURE exactly as before.
+ */
+export class LockContentionError extends TransientInfrastructureError {}
 
 /** Same Idempotency-Key, different business payload: a conflict, never a replay (spec 6.3). */
 export class IdempotencyKeyConflictError extends ApplicationError {
@@ -35,6 +43,19 @@ export class ExternalTransactionIdConflictError extends ApplicationError {
     readonly externalTransactionId: string,
   ) {
     super(`Transaction ${externalTransactionId} of ${providerId} already exists under another idempotency key`);
+  }
+}
+
+/**
+ * The inbox already has this messageId for this consumer, but with different data.
+ * A redelivery always carries the same data, so the producer reused an id: the
+ * message is not processed and goes to the DLQ for someone to look at.
+ */
+export class MessageIdConflictError extends ApplicationError {
+  readonly code = 'MESSAGE_ID_CONFLICT';
+
+  constructor(consumerName: string, messageId: string) {
+    super(`Message ${messageId} was already handled by ${consumerName} with different data`);
   }
 }
 
