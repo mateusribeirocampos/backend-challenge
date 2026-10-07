@@ -42,6 +42,8 @@ describe('loadConfig', () => {
       wagerQueueName: 'wager-transactions.fifo',
       wagerDeadLetterQueueName: 'wager-transactions-dlq.fifo',
       eventsQueueName: 'wagering-events.fifo',
+      connectionTimeoutMs: 3_000,
+      requestTimeoutMs: 5_000,
       consumer: {
         enabled: true,
         visibilityTimeoutSeconds: 30,

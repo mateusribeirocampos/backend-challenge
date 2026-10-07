@@ -11,6 +11,11 @@ export interface WagerConsumerSettings {
   readonly maxMessages: number;
   readonly visibilityTimeoutSeconds: number;
   readonly waitTimeSeconds: number;
+  /**
+   * Deadline of one ReceiveMessage: the long poll (waitTimeSeconds) plus a margin. Only
+   * reached when SQS does not answer at all; then the receive fails and the loop backs off.
+   */
+  readonly receiveRequestTimeoutMs: number;
   /** On stop, how long to wait for the messages already being processed. */
   readonly shutdownTimeoutMs: number;
   /** Delay before a message that failed with a transient error is delivered again. */
@@ -34,6 +39,8 @@ export class SqsWagerConsumer {
   private stopping = false;
   /** Cuts short a pause between failed receives. Never a long poll, never a message being processed. */
   private readonly stopSignal = new AbortController();
+  /** Received in the current batch and not handed to the handler yet: what stop() may still give back. */
+  private readonly notStarted = new Set<ReceivedMessage>();
 
   constructor(
     private readonly sqs: SQSClient,
@@ -66,8 +73,11 @@ export class SqsWagerConsumer {
    * server does not know the client gave up either). So stop waits for the poll to return
    * (at most waitTimeSeconds) and gives back whatever it brought.
    *
-   * Waits at most shutdownTimeoutMs; a message still running after that is not acked,
-   * so SQS delivers it again after its visibility timeout and the inbox makes that safe.
+   * Waits at most shutdownTimeoutMs. After that the messages not started yet are given
+   * back at once, so another instance gets them now instead of after the visibility timeout.
+   * The message still running is left alone: if it commits it is acked (late, but it was
+   * processed exactly once); if the ack fails or the process dies, SQS delivers it again
+   * and the inbox answers "already processed", so there is never a second debit.
    */
   async stop(): Promise<void> {
     if (this.loop === undefined || this.stopping) {
@@ -80,6 +90,7 @@ export class SqsWagerConsumer {
     if (drained) {
       this.logger.info('wager_consumer.stopped', { drained });
     } else {
+      await this.releaseAll(this.takeNotStarted([...this.notStarted]), 'shutdown_deadline');
       this.logger.warn('wager_consumer.stopped', { drained });
     }
   }
@@ -111,6 +122,7 @@ export class SqsWagerConsumer {
           VisibilityTimeout: this.settings.visibilityTimeoutSeconds,
           MessageSystemAttributeNames: ['ApproximateReceiveCount', 'MessageGroupId'],
         }),
+        { requestTimeout: this.settings.receiveRequestTimeoutMs },
       );
       const messages = (response.Messages ?? []).flatMap(toReceivedMessage);
       this.metrics.increment(MetricName.ConsumerReceives, { result: messages.length === 0 ? 'empty' : 'messages' });
@@ -123,6 +135,9 @@ export class SqsWagerConsumer {
   }
 
   private async processBatch(messages: readonly ReceivedMessage[]): Promise<void> {
+    for (const message of messages) {
+      this.notStarted.add(message);
+    }
     await Promise.all([...groupByMessageGroup(messages).values()].map((group) => this.processGroup(group)));
   }
 
@@ -130,15 +145,17 @@ export class SqsWagerConsumer {
   private async processGroup(group: readonly ReceivedMessage[]): Promise<void> {
     for (const [index, message] of group.entries()) {
       if (this.stopping) {
-        await this.releaseAll(group.slice(index), 'shutdown');
+        // takeNotStarted: after the drain deadline stop() may have released some already.
+        await this.releaseAll(this.takeNotStarted(group.slice(index)), 'shutdown');
         return;
       }
+      this.notStarted.delete(message);
       const disposition = await this.handler.handle(message);
       await this.apply(message, disposition);
       if (disposition.action === 'retry') {
         // Keep the wallet's order: the rest of the group goes back with this message
         // still invisible, and SQS FIFO holds the whole group until it comes back.
-        await this.releaseAll(group.slice(index + 1), 'group_order');
+        await this.releaseAll(this.takeNotStarted(group.slice(index + 1)), 'group_order');
         return;
       }
     }
@@ -182,8 +199,20 @@ export class SqsWagerConsumer {
     }
   }
 
+  /**
+   * Removes the messages from notStarted and returns the ones that were still there, so a
+   * message is released by stop() or by its group, never by both. No await inside: nothing
+   * else runs between the check and the removal.
+   */
+  private takeNotStarted(messages: readonly ReceivedMessage[]): ReceivedMessage[] {
+    return messages.filter((message) => this.notStarted.delete(message));
+  }
+
   /** Received but not started: visible again now, for this or another instance. */
-  private async releaseAll(messages: readonly ReceivedMessage[], cause: 'shutdown' | 'group_order'): Promise<void> {
+  private async releaseAll(
+    messages: readonly ReceivedMessage[],
+    cause: 'shutdown' | 'shutdown_deadline' | 'group_order',
+  ): Promise<void> {
     if (messages.length === 0) {
       return;
     }
