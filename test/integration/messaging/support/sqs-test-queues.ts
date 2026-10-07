@@ -81,8 +81,8 @@ export function consumerConfig(queues: TestQueues, consumer: Partial<WagerConsum
 
 /**
  * Environment for a child process running the app against the test queues. Only the
- * consumer runs: the outbox publisher would otherwise publish every event the other
- * tests left in the test database.
+ * consumer runs: the outbox publisher and the PENDING_REFERENCE worker would otherwise
+ * work on every row the other tests left in the test database.
  */
 export function consumerEnv(queues: TestQueues, extra: Record<string, string> = {}): Record<string, string> {
   return {
@@ -91,6 +91,7 @@ export function consumerEnv(queues: TestQueues, extra: Record<string, string> = 
     SQS_WAGER_DLQ_NAME: queues.deadLetterName,
     SQS_CONSUMER_ENABLED: 'true',
     OUTBOX_PUBLISHER_ENABLED: 'false',
+    PENDING_REFERENCE_WORKER_ENABLED: 'false',
     SQS_CONSUMER_WAIT_TIME_SECONDS: '1',
     ...extra,
   };

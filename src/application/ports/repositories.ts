@@ -46,10 +46,30 @@ export interface WagerTransactionRepository {
   /** True when a PROCESSED REFUND or ROLLBACK already points to this transaction. */
   hasProcessedReversal(transactionId: string): Promise<boolean>;
   /**
-   * Writes the decided status and result columns. nextReferenceCheckAt is required by
-   * the schema when the status is PENDING_REFERENCE (when the worker should look again).
+   * Writes the decided status and result columns, and the PENDING_REFERENCE schedule:
+   * referenceAttempts (worker checks so far) and nextReferenceCheckAt, which the schema
+   * requires when the status is PENDING_REFERENCE (when the worker should look again).
    */
-  saveOutcome(transaction: WagerTransaction, options: { readonly nextReferenceCheckAt?: Date | undefined }): Promise<void>;
+  saveOutcome(transaction: WagerTransaction, options: ReferenceCheckSchedule): Promise<void>;
+  /**
+   * The PENDING_REFERENCE worker's pick (ADR-008): the waiting transaction whose next
+   * check is the most overdue, locked with FOR NO KEY UPDATE SKIP LOCKED until the end
+   * of the SQL transaction. A row another worker holds is skipped, not waited for, and
+   * so are skipIds (rows that already failed in this batch).
+   */
+  lockNextDuePendingReference(now: Date, skipIds: readonly string[]): Promise<DuePendingReference | undefined>;
+}
+
+export interface ReferenceCheckSchedule {
+  readonly referenceAttempts: number;
+  /** undefined unless the transaction is (still) PENDING_REFERENCE. */
+  readonly nextReferenceCheckAt: Date | undefined;
+}
+
+export interface DuePendingReference {
+  readonly transaction: WagerTransaction;
+  /** Worker checks already made (reference_attempts). */
+  readonly referenceAttempts: number;
 }
 
 export interface LedgerRepository {

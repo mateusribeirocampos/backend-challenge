@@ -13,8 +13,9 @@ import { ID_GENERATOR, type IdGenerator } from './application/ports/id-generator
 import { METRICS, type Metrics } from './application/ports/metrics.js';
 import { STRUCTURED_LOGGER, type StructuredLogger } from './application/ports/structured-logger.js';
 import { TRANSACTION_RUNNER, type TransactionRunner } from './application/ports/transaction-runner.js';
+import { ResolvePendingReferences } from './application/wagering/resolve-pending-references.js';
 import { DEFAULT_RETRY_POLICY } from './domain/outbox/outbox-message.js';
-import type { AppConfig, OutboxPublisherConfig } from './infrastructure/config/app-config.js';
+import type { AppConfig, OutboxPublisherConfig, PendingReferenceWorkerConfig } from './infrastructure/config/app-config.js';
 import { SQS_CLIENT } from './infrastructure/messaging/sqs-client.provider.js';
 import { SqsEventPublisher } from './infrastructure/messaging/sqs-event-publisher.js';
 import { PollingLoop } from './interfaces/scheduling/polling-loop.js';
@@ -22,6 +23,7 @@ import { WageringModule } from './wagering.module.js';
 
 const WORKERS_CONFIG = Symbol('WORKERS_CONFIG');
 const OUTBOX_PUBLISHER_LOOP = Symbol('OUTBOX_PUBLISHER_LOOP');
+const PENDING_REFERENCE_LOOP = Symbol('PENDING_REFERENCE_LOOP');
 
 /** Longest pause of a loop after failures in a row (database or SQS down). */
 const MAX_ERROR_DELAY_MS = 30_000;
@@ -37,6 +39,7 @@ const MAX_ERROR_DELAY_MS = 30_000;
 export class BackgroundWorkersModule implements OnApplicationBootstrap, BeforeApplicationShutdown {
   constructor(
     @Inject(OUTBOX_PUBLISHER_LOOP) private readonly outboxPublisher: PollingLoop,
+    @Inject(PENDING_REFERENCE_LOOP) private readonly pendingReferences: PollingLoop,
     @Inject(WORKERS_CONFIG) private readonly config: AppConfig,
   ) {}
 
@@ -81,8 +84,31 @@ export class BackgroundWorkersModule implements OnApplicationBootstrap, BeforeAp
             ),
           inject: [PublishOutbox, STRUCTURED_LOGGER],
         },
+        {
+          provide: ResolvePendingReferences,
+          useFactory: (runner: TransactionRunner, clock: Clock, ids: IdGenerator, metrics: Metrics, logger: StructuredLogger) =>
+            new ResolvePendingReferences(runner, clock, ids, metrics, logger, workerSettings(config.pendingReferenceWorker)),
+          inject: [TRANSACTION_RUNNER, CLOCK, ID_GENERATOR, METRICS, STRUCTURED_LOGGER],
+        },
+        {
+          provide: PENDING_REFERENCE_LOOP,
+          useFactory: (resolvePendingReferences: ResolvePendingReferences, logger: StructuredLogger) =>
+            new PollingLoop(
+              'pending-reference-worker',
+              async (shouldStop) =>
+                (await resolvePendingReferences.resolveBatch(shouldStop)).checked === config.pendingReferenceWorker.batchSize,
+              {
+                idleDelayMs: config.pendingReferenceWorker.pollIntervalMs,
+                maxErrorDelayMs: MAX_ERROR_DELAY_MS,
+                // One check is one short SQL transaction, bounded by the 2 s lock_timeout.
+                shutdownTimeoutMs: 5_000,
+              },
+              logger,
+            ),
+          inject: [ResolvePendingReferences, STRUCTURED_LOGGER],
+        },
       ],
-      exports: [PublishOutbox],
+      exports: [PublishOutbox, ResolvePendingReferences],
     };
   }
 
@@ -90,10 +116,13 @@ export class BackgroundWorkersModule implements OnApplicationBootstrap, BeforeAp
     if (this.config.outboxPublisher.enabled) {
       this.outboxPublisher.start();
     }
+    if (this.config.pendingReferenceWorker.enabled) {
+      this.pendingReferences.start();
+    }
   }
 
   async beforeApplicationShutdown(): Promise<void> {
-    await this.outboxPublisher.stop();
+    await Promise.all([this.outboxPublisher.stop(), this.pendingReferences.stop()]);
   }
 }
 
@@ -103,5 +132,17 @@ function publisherSettings(config: OutboxPublisherConfig) {
     leaseMs: config.leaseSeconds * 1000,
     sendTimeoutMs: config.sendTimeoutMs,
     retry: DEFAULT_RETRY_POLICY,
+  };
+}
+
+function workerSettings(config: PendingReferenceWorkerConfig) {
+  return {
+    batchSize: config.batchSize,
+    wait: {
+      maxAttempts: config.maxAttempts,
+      baseDelayMs: config.baseDelayMs,
+      maxDelayMs: config.maxDelayMs,
+      random: Math.random,
+    },
   };
 }

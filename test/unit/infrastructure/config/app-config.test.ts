@@ -221,3 +221,43 @@ describe('loadConfig: outbox publisher', () => {
     ]);
   });
 });
+
+describe('loadConfig: PENDING_REFERENCE worker', () => {
+  test('on by default: 15 checks, 1 s base, 60 s ceiling (a window of about 4.5 to 9 minutes)', () => {
+    expect(loadConfig(validEnv).pendingReferenceWorker).toEqual({
+      enabled: true,
+      maxAttempts: 15,
+      baseDelayMs: 1_000,
+      maxDelayMs: 60_000,
+      batchSize: 20,
+      pollIntervalMs: 500,
+    });
+  });
+
+  test('reads every setting', () => {
+    const config = loadConfig({
+      ...validEnv,
+      PENDING_REFERENCE_WORKER_ENABLED: 'false',
+      PENDING_REFERENCE_MAX_ATTEMPTS: '3',
+      PENDING_REFERENCE_BASE_DELAY_MS: '20',
+      PENDING_REFERENCE_MAX_DELAY_MS: '40',
+      PENDING_REFERENCE_BATCH_SIZE: '5',
+      PENDING_REFERENCE_POLL_INTERVAL_MS: '10',
+    });
+
+    expect(config.pendingReferenceWorker).toEqual({
+      enabled: false,
+      maxAttempts: 3,
+      baseDelayMs: 20,
+      maxDelayMs: 40,
+      batchSize: 5,
+      pollIntervalMs: 10,
+    });
+  });
+
+  test('the ceiling cannot be below the base delay', () => {
+    expect(problemsFor({ ...validEnv, PENDING_REFERENCE_BASE_DELAY_MS: '5000', PENDING_REFERENCE_MAX_DELAY_MS: '1000' })).toEqual([
+      'PENDING_REFERENCE_MAX_DELAY_MS: must be at least PENDING_REFERENCE_BASE_DELAY_MS',
+    ]);
+  });
+});

@@ -25,6 +25,13 @@ export interface ApplyWagerTransactionInput {
   /** Id for the ledger entry, used only if the balance moves. */
   readonly ledgerEntryId: string;
   readonly at: Date;
+  /**
+   * The PENDING_REFERENCE worker's final check (ADR-008): if the reference still does not
+   * exist, the wait is over and the transaction is REJECTED with REFERENCE_NOT_FOUND. A
+   * reference that exists but is still PENDING or PENDING_REFERENCE keeps it waiting.
+   * Always false for a new submission.
+   */
+  readonly lastReferenceCheck?: boolean;
 }
 
 export type WagerOutcome =
@@ -69,6 +76,12 @@ export function applyWagerTransaction(input: ApplyWagerTransactionInput): WagerO
   if (transaction.hasReference()) {
     const referenceProblem = checkReference(input);
     if (referenceProblem === 'WAIT') {
+      if (input.lastReferenceCheck === true && input.reference === undefined) {
+        // The wait is over and the reference never arrived. A reference that exists but
+        // has not finished keeps this one waiting instead: when it ends, this one is
+        // decided (PROCESSED, or REFERENCE_NOT_PROCESSED), never rejected before it.
+        return reject(input, FailureCode.ReferenceNotFound, wallet.balance);
+      }
       return waitForReference(transaction, at);
     }
     if (referenceProblem !== undefined) {

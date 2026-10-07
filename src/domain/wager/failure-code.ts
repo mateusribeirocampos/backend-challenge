@@ -32,7 +32,7 @@ export const FailureCode = {
    * REFUND/ROLLBACK and also to a WIN/LOSS that tries to settle a reversed BET.
    */
   ReferenceAlreadyReversed: 'REFERENCE_ALREADY_REVERSED',
-  /** PENDING_REFERENCE gave up: the reference never arrived (ADR-008 part B, worker). */
+  /** PENDING_REFERENCE gave up (ADR-008 part B, worker): the reference never arrived within the wait. */
   ReferenceNotFound: 'REFERENCE_NOT_FOUND',
 
   // ---- FAILED: permanent infrastructure error, terminal, kept for audit (Slice 3 on).

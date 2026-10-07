@@ -1,9 +1,13 @@
 import type { EntityManager } from '@mikro-orm/postgresql';
-import type { WagerTransactionRepository } from '../../../application/ports/repositories.js';
+import type {
+  DuePendingReference,
+  ReferenceCheckSchedule,
+  WagerTransactionRepository,
+} from '../../../application/ports/repositories.js';
 import { WagerTransactionKind } from '../../../domain/wager/wager-transaction-kind.js';
 import { WagerTransactionStatus } from '../../../domain/wager/wager-transaction-status.js';
 import type { WagerTransaction } from '../../../domain/wager/wager-transaction.js';
-import { WagerTransactionEntity } from '../entities/wager-transaction.entity.js';
+import { WagerTransactionEntity, type WagerTransactionRecord } from '../entities/wager-transaction.entity.js';
 import {
   toOutcomeColumns,
   toWagerTransaction,
@@ -84,18 +88,44 @@ export class MikroOrmWagerTransactionRepository implements WagerTransactionRepos
     return reversals > 0;
   }
 
-  async saveOutcome(
-    transaction: WagerTransaction,
-    options: { readonly nextReferenceCheckAt?: Date | undefined },
-  ): Promise<void> {
+  async saveOutcome(transaction: WagerTransaction, options: ReferenceCheckSchedule): Promise<void> {
     const updated = await this.em.nativeUpdate(
       WagerTransactionEntity,
       { id: transaction.id },
-      { ...toOutcomeColumns(transaction), nextReferenceCheckAt: options.nextReferenceCheckAt ?? null },
+      {
+        ...toOutcomeColumns(transaction),
+        referenceAttempts: options.referenceAttempts,
+        nextReferenceCheckAt: options.nextReferenceCheckAt ?? null,
+      },
     );
     if (updated !== 1) {
       throw new Error(`Transaction ${transaction.id} was not found to save its outcome`);
     }
+  }
+
+  async lockNextDuePendingReference(now: Date, skipIds: readonly string[]): Promise<DuePendingReference | undefined> {
+    // FOR NO KEY UPDATE, not FOR UPDATE: a REFUND or ROLLBACK being decided under the
+    // wallet lock may point its reference_transaction_id at this row, and that foreign
+    // key check takes FOR KEY SHARE here. FOR UPDATE would block it while this worker
+    // waits for the same wallet lock: a deadlock. SKIP LOCKED: another worker's row is
+    // skipped, never waited for. The partial index wager_transactions_due_pending_reference
+    // serves the WHERE and the ORDER BY.
+    const notSkipped = skipIds.length === 0 ? '' : `and id not in (${skipIds.map(() => '?').join(', ')})`;
+    const rows = await this.em.execute(
+      `select *
+         from wager_transactions
+        where status = 'PENDING_REFERENCE' and next_reference_check_at <= ? ${notSkipped}
+        order by next_reference_check_at
+        limit 1
+          for no key update skip locked`,
+      [now.toISOString(), ...skipIds],
+    );
+    const [row] = rows;
+    if (row === undefined) {
+      return undefined;
+    }
+    const record = this.em.map(WagerTransactionEntity, row, FRESH) as WagerTransactionRecord;
+    return { transaction: toWagerTransaction(record), referenceAttempts: record.referenceAttempts };
   }
 
   private async findOneBy(

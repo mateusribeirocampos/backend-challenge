@@ -36,6 +36,12 @@ export const MetricName = {
   OutboxDuplicatePublishes: 'wager_outbox_duplicate_publishes_total',
   /** Gauge: age in seconds of the oldest event not published yet (0 when there is none). */
   OutboxLagSeconds: 'wager_outbox_lag_seconds',
+
+  // ---- PENDING_REFERENCE worker (ADR-008)
+  /** A waiting transaction found its reference and was decided. Label: status (PROCESSED | REJECTED). */
+  PendingReferencesResolved: 'wager_pending_references_resolved_total',
+  /** A waiting transaction gave up: REJECTED with REFERENCE_NOT_FOUND. */
+  PendingReferencesExpired: 'wager_pending_references_expired_total',
 } as const;
 export type MetricName = (typeof MetricName)[keyof typeof MetricName];
 

@@ -38,8 +38,11 @@ export class WalletScenario {
     return transaction;
   }
 
-  /** Applies a stored transaction, e.g. a PENDING_REFERENCE one after its reference arrived. */
-  apply(transaction: WagerTransaction): WagerOutcome {
+  /**
+   * Applies a stored transaction, e.g. a PENDING_REFERENCE one after its reference arrived.
+   * lastReferenceCheck: the PENDING_REFERENCE worker's final check (ADR-008).
+   */
+  apply(transaction: WagerTransaction, options: { lastReferenceCheck?: boolean } = {}): WagerOutcome {
     const reference = this.find(transaction.referenceExternalTransactionId);
     const outcome = applyWagerTransaction({
       wallet: this.wallet,
@@ -48,6 +51,7 @@ export class WalletScenario {
       referenceAlreadyReversed: reference !== undefined && this.isReversed(reference),
       ledgerEntryId: `entry-${this.ledger.length + 1}`,
       at: LATER,
+      lastReferenceCheck: options.lastReferenceCheck ?? false,
     });
     if (outcome.status === WagerTransactionStatus.Processed && outcome.ledgerEntry !== undefined) {
       this.ledger.push(outcome.ledgerEntry);

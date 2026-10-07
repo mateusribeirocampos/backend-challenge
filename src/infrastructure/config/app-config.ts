@@ -13,6 +13,7 @@ export interface AppConfig {
   readonly database: DatabaseConfig;
   readonly sqs: SqsConfig;
   readonly outboxPublisher: OutboxPublisherConfig;
+  readonly pendingReferenceWorker: PendingReferenceWorkerConfig;
 }
 
 export interface DatabaseConfig {
@@ -67,6 +68,21 @@ export interface OutboxPublisherConfig {
   /** A SendMessage that takes longer is given up and retried. Shorter than the lease. */
   readonly sendTimeoutMs: number;
   /** Pause when there was nothing (more) to publish. */
+  readonly pollIntervalMs: number;
+}
+
+/** The PENDING_REFERENCE worker (spec 7.1, ADR-008), a loop inside every app instance. */
+export interface PendingReferenceWorkerConfig {
+  /** false: this instance does not check pending references. The integration tests start theirs explicitly. */
+  readonly enabled: boolean;
+  /** Checks before giving up with REFERENCE_NOT_FOUND (only when the reference does not exist). */
+  readonly maxAttempts: number;
+  /** Backoff between checks: min(maxDelayMs, baseDelayMs * 2^(n-1)), with jitter. */
+  readonly baseDelayMs: number;
+  readonly maxDelayMs: number;
+  /** Pending transactions checked per run. */
+  readonly batchSize: number;
+  /** Pause when nothing (more) was due. */
   readonly pollIntervalMs: number;
 }
 
@@ -134,6 +150,12 @@ const envSchema = z
     OUTBOX_PUBLISHER_LEASE_SECONDS: integerBetween(1, 3600).default(30),
     OUTBOX_PUBLISHER_SEND_TIMEOUT_MS: integerBetween(100, 60_000).default(5_000),
     OUTBOX_PUBLISHER_POLL_INTERVAL_MS: integerBetween(10, 60_000).default(500),
+    PENDING_REFERENCE_WORKER_ENABLED: booleanFlag.default(true),
+    PENDING_REFERENCE_MAX_ATTEMPTS: integerBetween(1, 100).default(15),
+    PENDING_REFERENCE_BASE_DELAY_MS: integerBetween(1, 3_600_000).default(1_000),
+    PENDING_REFERENCE_MAX_DELAY_MS: integerBetween(1, 3_600_000).default(60_000),
+    PENDING_REFERENCE_BATCH_SIZE: integerBetween(1, 100).default(20),
+    PENDING_REFERENCE_POLL_INTERVAL_MS: integerBetween(10, 60_000).default(500),
   })
   .refine((env) => (env.AWS_ACCESS_KEY_ID === undefined) === (env.AWS_SECRET_ACCESS_KEY === undefined), {
     message: 'AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY must be set together or both left empty',
@@ -146,6 +168,10 @@ const envSchema = z
   .refine((env) => env.OUTBOX_PUBLISHER_LEASE_SECONDS * 1000 > env.OUTBOX_PUBLISHER_SEND_TIMEOUT_MS, {
     message: 'must be longer than OUTBOX_PUBLISHER_SEND_TIMEOUT_MS (a send must end while the lease holds)',
     path: ['OUTBOX_PUBLISHER_LEASE_SECONDS'],
+  })
+  .refine((env) => env.PENDING_REFERENCE_MAX_DELAY_MS >= env.PENDING_REFERENCE_BASE_DELAY_MS, {
+    message: 'must be at least PENDING_REFERENCE_BASE_DELAY_MS',
+    path: ['PENDING_REFERENCE_MAX_DELAY_MS'],
   });
 
 type RawEnv = Readonly<Record<string, string | undefined>>;
@@ -193,6 +219,14 @@ export function loadConfig(rawEnv: RawEnv): AppConfig {
       leaseSeconds: env.OUTBOX_PUBLISHER_LEASE_SECONDS,
       sendTimeoutMs: env.OUTBOX_PUBLISHER_SEND_TIMEOUT_MS,
       pollIntervalMs: env.OUTBOX_PUBLISHER_POLL_INTERVAL_MS,
+    },
+    pendingReferenceWorker: {
+      enabled: env.PENDING_REFERENCE_WORKER_ENABLED,
+      maxAttempts: env.PENDING_REFERENCE_MAX_ATTEMPTS,
+      baseDelayMs: env.PENDING_REFERENCE_BASE_DELAY_MS,
+      maxDelayMs: env.PENDING_REFERENCE_MAX_DELAY_MS,
+      batchSize: env.PENDING_REFERENCE_BATCH_SIZE,
+      pollIntervalMs: env.PENDING_REFERENCE_POLL_INTERVAL_MS,
     },
   };
 }

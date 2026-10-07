@@ -47,6 +47,7 @@ export function publisherEnv(eventsQueueName: string, extra: Record<string, stri
   return {
     DATABASE_NAME: integrationConfig().database.dbName,
     SQS_CONSUMER_ENABLED: 'false',
+    PENDING_REFERENCE_WORKER_ENABLED: 'false',
     SQS_EVENTS_QUEUE_NAME: eventsQueueName,
     OUTBOX_PUBLISHER_ENABLED: 'true',
     OUTBOX_PUBLISHER_POLL_INTERVAL_MS: '20',
