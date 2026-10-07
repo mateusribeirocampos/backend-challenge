@@ -117,7 +117,13 @@ export class WagerTransaction {
   private readonly state: Mutable<WagerTransactionState>;
 
   private constructor(state: WagerTransactionState) {
-    this.state = { ...state };
+    // Own copies of the dates: the caller's Date objects can be changed with setTime().
+    this.state = {
+      ...state,
+      createdAt: copyOf(state.createdAt),
+      updatedAt: copyOf(state.updatedAt),
+      processedAt: state.processedAt === undefined ? undefined : copyOf(state.processedAt),
+    };
   }
 
   /** A transaction submitted by a provider. Starts PENDING. */
@@ -200,13 +206,13 @@ export class WagerTransaction {
   get kind(): WagerTransactionKind { return this.state.kind; }
   get money(): Money { return this.state.money; }
   get referenceExternalTransactionId(): string | undefined { return this.state.referenceExternalTransactionId; }
-  get createdAt(): Date { return this.state.createdAt; }
+  get createdAt(): Date { return copyOf(this.state.createdAt); }
   get status(): WagerTransactionStatus { return this.state.status; }
   get referenceTransactionId(): string | undefined { return this.state.referenceTransactionId; }
   get failureCode(): FailureCode | undefined { return this.state.failureCode; }
   get resultBalance(): Money | undefined { return this.state.resultBalance; }
-  get processedAt(): Date | undefined { return this.state.processedAt; }
-  get updatedAt(): Date { return this.state.updatedAt; }
+  get processedAt(): Date | undefined { return this.state.processedAt === undefined ? undefined : copyOf(this.state.processedAt); }
+  get updatedAt(): Date { return copyOf(this.state.updatedAt); }
 
   // ---- transitions (throw InvalidTransactionStateError when ALLOWED_TRANSITIONS says no)
 
@@ -214,7 +220,7 @@ export class WagerTransaction {
     this.transitionTo(WagerTransactionStatus.Processed, props.at);
     this.state.referenceTransactionId = props.referenceTransactionId;
     this.state.resultBalance = props.resultBalance;
-    this.state.processedAt = props.at;
+    this.state.processedAt = copyOf(props.at);
   }
 
   markPendingReference(at: Date): void {
@@ -295,7 +301,7 @@ export class WagerTransaction {
       throw new InvalidTransactionStateError(this.state.id, this.state.status, next);
     }
     this.state.status = next;
-    this.state.updatedAt = at;
+    this.state.updatedAt = copyOf(at);
   }
 
   private static opposite(direction: LedgerDirection): LedgerDirection {
@@ -429,4 +435,8 @@ export class WagerTransaction {
       );
     }
   }
+}
+
+function copyOf(date: Date): Date {
+  return new Date(date.getTime());
 }

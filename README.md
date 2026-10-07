@@ -83,6 +83,7 @@ Os logs do consumer são uma linha JSON por evento (`wager_message.processed`, `
 | `SQS_CONSUMER_WAIT_TIME_SECONDS` | `10` | long polling |
 | `SQS_CONSUMER_SHUTDOWN_TIMEOUT_SECONDS` | `15` | espera máxima no `SIGTERM`; precisa ser maior que o long polling |
 | `SQS_CONSUMER_RETRY_BASE_SECONDS`, `SQS_CONSUMER_RETRY_MAX_SECONDS` | `5`, `300` | backoff de erro transitório |
+| `SQS_CONNECTION_TIMEOUT_MS`, `SQS_REQUEST_TIMEOUT_MS` | `3000`, `5000` | prazo de toda chamada SQS; o receive soma o long polling |
 
 #### Reprocessar uma mensagem da DLQ
 

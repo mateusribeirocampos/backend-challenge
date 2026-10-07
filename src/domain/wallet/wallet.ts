@@ -80,8 +80,9 @@ export class Wallet {
     readonly currency: string,
     private _balance: Money,
     private _version: number,
-    readonly createdAt: Date,
-    private _updatedAt: Date,
+    // Epoch milliseconds, not Date: a stored Date could be changed through any reference to it.
+    private readonly createdAtEpochMs: number,
+    private updatedAtEpochMs: number,
   ) {}
 
   /**
@@ -105,8 +106,8 @@ export class Wallet {
       props.initialBalance.currency,
       props.initialBalance,
       INITIAL_WALLET_VERSION,
-      props.at,
-      props.at,
+      props.at.getTime(),
+      props.at.getTime(),
     );
     if (props.initialBalance.isZero()) {
       return { wallet, opening: undefined };
@@ -141,8 +142,8 @@ export class Wallet {
       state.currency,
       state.balance,
       state.version,
-      state.createdAt,
-      state.updatedAt,
+      state.createdAt.getTime(),
+      state.updatedAt.getTime(),
     );
   }
 
@@ -155,8 +156,13 @@ export class Wallet {
     return this._version;
   }
 
+  /** A new Date on every read: changing it does not change the wallet. */
+  get createdAt(): Date {
+    return new Date(this.createdAtEpochMs);
+  }
+
   get updatedAt(): Date {
-    return this._updatedAt;
+    return new Date(this.updatedAtEpochMs);
   }
 
   /** True when debiting money keeps the balance at zero or above. */
@@ -217,7 +223,7 @@ export class Wallet {
 
     this._balance = balanceAfter;
     this._version = nextVersion;
-    this._updatedAt = props.at;
+    this.updatedAtEpochMs = props.at.getTime();
     return entry;
   }
 

@@ -70,7 +70,7 @@ export class WagerConsumerModule implements OnApplicationBootstrap, BeforeApplic
             actions: MessageActions,
             logger: StructuredLogger,
             metrics: Metrics,
-          ) => new SqsWagerConsumer(sqs, queues, handler, actions, settingsOf(config.consumer), logger, metrics),
+          ) => new SqsWagerConsumer(sqs, queues, handler, actions, settingsOf(config), logger, metrics),
           inject: [SQS_CLIENT, WagerQueues, WagerMessageHandler, MESSAGE_ACTIONS, STRUCTURED_LOGGER, METRICS],
         },
       ],
@@ -88,11 +88,14 @@ export class WagerConsumerModule implements OnApplicationBootstrap, BeforeApplic
   }
 }
 
-function settingsOf(config: WagerConsumerConfig): WagerConsumerSettings {
+function settingsOf(sqsConfig: SqsConfig): WagerConsumerSettings {
+  const config = sqsConfig.consumer;
   return {
     maxMessages: 10,
     visibilityTimeoutSeconds: config.visibilityTimeoutSeconds,
     waitTimeSeconds: config.waitTimeSeconds,
+    // A long poll may legitimately take the whole wait time; the usual request deadline is the margin.
+    receiveRequestTimeoutMs: config.waitTimeSeconds * 1000 + sqsConfig.requestTimeoutMs,
     shutdownTimeoutMs: config.shutdownTimeoutSeconds * 1000,
     retry: {
       baseDelaySeconds: config.retryBaseDelaySeconds,

@@ -422,3 +422,29 @@ function rehydrated(status: WagerTransactionStatus): WagerTransaction {
   };
   return WagerTransaction.rehydrate(state);
 }
+
+describe('WagerTransaction dates cannot be changed through a Date reference', () => {
+  const instant = '2026-10-06T12:00:00.000Z';
+
+  test('mutating the Date given in or read back does not move createdAt, updatedAt or processedAt', () => {
+    const createdAt = new Date(instant);
+    const processedAt = new Date(instant);
+    const transaction = WagerTransaction.create({
+      ...submitProps({ kind: WagerTransactionKind.Bet, money: brl('25.00'), externalTransactionId: 'ext-dates' }),
+      createdAt,
+    });
+    transaction.markProcessed({ referenceTransactionId: undefined, resultBalance: brl('75.00'), at: processedAt });
+
+    createdAt.setTime(0);
+    processedAt.setTime(0);
+    transaction.createdAt.setTime(0);
+    transaction.updatedAt.setTime(0);
+    transaction.processedAt?.setTime(0);
+
+    expect([transaction.createdAt, transaction.updatedAt, transaction.processedAt].map((date) => date?.toISOString())).toEqual([
+      instant,
+      instant,
+      instant,
+    ]);
+  });
+});

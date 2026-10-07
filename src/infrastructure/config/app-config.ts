@@ -35,6 +35,10 @@ export interface SqsConfig {
   readonly wagerDeadLetterQueueName: string;
   /** Where the outbox publisher sends the integration events. */
   readonly eventsQueueName: string;
+  /** Deadline to open the TCP connection of any SQS call. */
+  readonly connectionTimeoutMs: number;
+  /** Deadline of a whole SQS call. ReceiveMessage gets the long poll wait time on top of it. */
+  readonly requestTimeoutMs: number;
   readonly consumer: WagerConsumerConfig;
 }
 
@@ -137,6 +141,8 @@ const envSchema = z
     SQS_ENDPOINT: z.url('must be a URL like http://localhost:4566').optional(),
     SQS_WAGER_QUEUE_NAME: fifoQueueName,
     SQS_WAGER_DLQ_NAME: fifoQueueName.default('wager-transactions-dlq.fifo'),
+    SQS_CONNECTION_TIMEOUT_MS: integerBetween(100, 60_000).default(3_000),
+    SQS_REQUEST_TIMEOUT_MS: integerBetween(100, 60_000).default(5_000),
     SQS_CONSUMER_ENABLED: booleanFlag.default(true),
     SQS_CONSUMER_VISIBILITY_TIMEOUT_SECONDS: integerBetween(1, 43_200).default(30),
     SQS_CONSUMER_WAIT_TIME_SECONDS: integerBetween(0, 20).default(10),
@@ -204,6 +210,8 @@ export function loadConfig(rawEnv: RawEnv): AppConfig {
       wagerQueueName: env.SQS_WAGER_QUEUE_NAME,
       wagerDeadLetterQueueName: env.SQS_WAGER_DLQ_NAME,
       eventsQueueName: env.SQS_EVENTS_QUEUE_NAME,
+      connectionTimeoutMs: env.SQS_CONNECTION_TIMEOUT_MS,
+      requestTimeoutMs: env.SQS_REQUEST_TIMEOUT_MS,
       consumer: {
         enabled: env.SQS_CONSUMER_ENABLED,
         visibilityTimeoutSeconds: env.SQS_CONSUMER_VISIBILITY_TIMEOUT_SECONDS,

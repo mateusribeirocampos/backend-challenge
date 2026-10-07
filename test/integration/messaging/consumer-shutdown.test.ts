@@ -1,8 +1,12 @@
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, setDefaultTimeout, test } from 'bun:test';
 import type { SQSClient } from '@aws-sdk/client-sqs';
 import type { MikroORM } from '@mikro-orm/postgresql';
-import { MetricName } from '../../../src/application/ports/metrics.js';
+import { METRICS, type Metrics, MetricName } from '../../../src/application/ports/metrics.js';
 import { createSqsClient } from '../../../src/infrastructure/messaging/sqs-client.provider.js';
+import { SqsMessageActions, type ReceivedMessage, WagerQueues } from '../../../src/interfaces/messaging/sqs-message-actions.js';
+import { SqsWagerConsumer } from '../../../src/interfaces/messaging/sqs-wager-consumer.js';
+import { WagerMessageHandler } from '../../../src/interfaces/messaging/wager-message-handler.js';
+import { CapturingLogger } from '../support/capturing-logger.js';
 import { DedicatedConnection } from '../schema/support/dedicated-connection.js';
 import { openMigratedDatabase } from '../schema/support/schema-sql.js';
 import { AppProcess } from '../support/app-process.js';
@@ -147,5 +151,80 @@ describe('SQS consumer: SIGTERM', () => {
     // (Test f is the one that catches an aborted poll hiding a message.)
     expect(await queueDepth(sqs, queues.url)).toEqual({ visible: 1, inFlight: 0 });
     await expectBalanceMatchesLedger(orm, http.baseUrl, wallet.id, '100.00');
+  });
+
+  test('drain deadline passed: the not started messages of the held group are released at once, and the held one still ends consistently', async () => {
+    const wallet = await openWallet(http.baseUrl, '100.00');
+    const messages = ['10.00', '20.00', '30.00'].map((amount) =>
+      wagerMessage(wallet, { money: { amount, currency: 'BRL' } }),
+    );
+    for (const message of messages) {
+      await sendWagerMessage(sqs, queues.url, message); // one group, in this order
+    }
+    const realHandler = http.get(WagerMessageHandler);
+    let entered = 0;
+    let letGo: () => void = () => {};
+    const gate = new Promise<void>((resolve) => {
+      letGo = resolve;
+    });
+    // The first message stays in its handler longer than the shutdown timeout.
+    const heldHandler = {
+      handle: async (message: ReceivedMessage) => {
+        entered += 1;
+        if (entered === 1) await gate;
+        return realHandler.handle(message);
+      },
+    };
+    const logger = new CapturingLogger();
+    const wagerQueues = new WagerQueues(sqs, { source: queues.name, deadLetter: queues.deadLetterName });
+    const consumer = new SqsWagerConsumer(
+      sqs,
+      wagerQueues,
+      heldHandler,
+      new SqsMessageActions(sqs, wagerQueues),
+      {
+        maxMessages: 10,
+        visibilityTimeoutSeconds: 60, // a message that is not released would stay hidden past this test
+        waitTimeSeconds: 1,
+        receiveRequestTimeoutMs: 6_000,
+        shutdownTimeoutMs: 500,
+        retry: { baseDelaySeconds: 1, maxDelaySeconds: 1, random: () => 0 },
+        receiveBackoff: { baseDelaySeconds: 1, maxDelaySeconds: 1, random: () => 0 },
+      },
+      logger,
+      http.get<Metrics>(METRICS),
+    );
+
+    consumer.start();
+    await waitUntil('the first message is held in its handler', () => entered === 1);
+    await consumer.stop();
+
+    expect(logger.events('wager_consumer.stopped')[0]?.fields).toEqual({ drained: false });
+    // Right after stop() returned, not after the 60 s visibility timeout.
+    expect(await queueDepth(sqs, queues.url)).toEqual({ visible: 2, inFlight: 1 });
+
+    letGo(); // the held one commits and is acked late; the loop then sees nothing left to start
+    await waitUntil('the held message is acked', async () => (await queueDepth(sqs, queues.url)).inFlight === 0);
+    expect(entered).toBe(1);
+
+    const next = await startTestApp(consumerConfig(queues));
+    try {
+      await waitUntil('the two released messages are processed', async () =>
+        (await isEmpty(sqs, queues.url)) &&
+        next.metrics.value(MetricName.MessagesProcessed, { status: 'PROCESSED' }) === 2,
+      );
+    } finally {
+      await next.close();
+    }
+    for (const message of messages) {
+      expect(await inboxRows(orm, message.messageId)).toHaveLength(1);
+    }
+    expect((await ledgerEntries(orm, wallet.id)).map((entry) => [entry.direction, entry.amount])).toEqual([
+      ['CREDIT', '100.00'],
+      ['DEBIT', '10.00'],
+      ['DEBIT', '20.00'],
+      ['DEBIT', '30.00'],
+    ]);
+    await expectBalanceMatchesLedger(orm, http.baseUrl, wallet.id, '40.00');
   });
 });

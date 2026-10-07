@@ -22,8 +22,22 @@ const TRANSIENT_SQLSTATES = new Set([
   '08006', // connection_failure
 ]);
 
-/** Socket errors raised by the driver before PostgreSQL even answers. */
-const TRANSIENT_NETWORK_CODES = new Set(['ECONNREFUSED', 'ECONNRESET', 'ETIMEDOUT', 'EPIPE', 'EHOSTUNREACH', 'EAI_AGAIN']);
+/**
+ * Socket errors raised by the driver before PostgreSQL even answers. ENOTFOUND is here on
+ * purpose: a DNS failure is usually temporary, and a host name that is really wrong only
+ * costs retries until the queue's maxReceiveCount sends the message to the DLQ.
+ */
+const TRANSIENT_NETWORK_CODES = new Set([
+  'ECONNREFUSED',
+  'ECONNRESET',
+  'ETIMEDOUT',
+  'EPIPE',
+  'EHOSTUNREACH',
+  'EHOSTDOWN',
+  'ENETUNREACH',
+  'EAI_AGAIN',
+  'ENOTFOUND',
+]);
 
 /** pg raises these without a code when the connection drops in the middle of a query. */
 const CONNECTION_LOST_MESSAGES = ['Connection terminated', 'connection timeout', 'timeout exceeded when trying to connect'];

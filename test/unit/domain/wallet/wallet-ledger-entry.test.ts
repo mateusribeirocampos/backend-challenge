@@ -89,3 +89,27 @@ describe('WalletLedgerEntry is immutable', () => {
     expect(entry.isBalanced()).toBe(false);
   });
 });
+
+describe('WalletLedgerEntry.createdAt cannot be changed through a Date reference', () => {
+  const instant = '2026-10-06T12:00:00.000Z';
+
+  test.each([
+    ['create', (createdAt: Date) => WalletLedgerEntry.create(entryProps({ createdAt }))],
+    ['rehydrate', (createdAt: Date) => WalletLedgerEntry.rehydrate(entryProps({ createdAt }))],
+  ])('%s: mutating the Date given in does not move the entry', (_factory, build) => {
+    const input = new Date(instant);
+    const entry = build(input);
+
+    input.setTime(0);
+
+    expect(entry.createdAt.toISOString()).toBe(instant);
+  });
+
+  test('mutating the Date read from it does not move the entry (Object.freeze alone does not stop setTime)', () => {
+    const entry = WalletLedgerEntry.create(entryProps({ createdAt: new Date(instant) }));
+
+    entry.createdAt.setTime(0);
+
+    expect(entry.createdAt.toISOString()).toBe(instant);
+  });
+});

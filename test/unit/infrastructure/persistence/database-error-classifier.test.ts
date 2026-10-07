@@ -30,6 +30,9 @@ describe('isTransientDatabaseError: "retry with the same key" vs "do not retry"'
     ['ECONNREFUSED (database down)', 'ECONNREFUSED'],
     ['ECONNRESET (connection dropped)', 'ECONNRESET'],
     ['ETIMEDOUT', 'ETIMEDOUT'],
+    ['ENETUNREACH (route to the database temporarily gone)', 'ENETUNREACH'],
+    ['EHOSTDOWN (database host down)', 'EHOSTDOWN'],
+    ['ENOTFOUND (DNS failed; the SQS redrive bounds a misconfigured host)', 'ENOTFOUND'],
   ])('transient: %s', (_name, code) => {
     expect(isTransientDatabaseError(driverError(code))).toBe(true);
   });
