@@ -2,6 +2,8 @@ import { Body, Controller, Get, HttpCode, HttpStatus, Inject, Param, Post, Query
 import { GetWallet } from '../../application/wallets/get-wallet.js';
 import { GetWalletLedger, type LedgerEntryView } from '../../application/wallets/get-wallet-ledger.js';
 import { OpenWallet } from '../../application/wallets/open-wallet.js';
+import { ReconcileWallet } from '../../application/wallets/reconcile-wallet.js';
+import type { ReconciliationProps } from '../../domain/wallet/wallet-reconciliation.js';
 import type { WalletView } from '../../application/wallets/wallet-view.js';
 import { correlationIdOf } from './correlation-id.middleware.js';
 import type { HttpRequest } from './http-types.js';
@@ -25,6 +27,7 @@ export class WalletsController {
     @Inject(OpenWallet) private readonly openWallet: OpenWallet,
     @Inject(GetWallet) private readonly getWallet: GetWallet,
     @Inject(GetWalletLedger) private readonly getWalletLedger: GetWalletLedger,
+    @Inject(ReconcileWallet) private readonly reconcileWallet: ReconcileWallet,
   ) {}
 
   /** 201 created; 409 WALLET_ALREADY_EXISTS for the same player and currency. */
@@ -51,5 +54,13 @@ export class WalletsController {
       entries: page.entries,
       nextCursor: page.nextAfterVersion === undefined ? null : encodeLedgerCursor(page.nextAfterVersion),
     };
+  }
+
+  /** 200 also when the wallet diverges (consistent: false): the check itself worked. 404 for an unknown wallet. */
+  @Post(':walletId/reconciliation')
+  @HttpCode(HttpStatus.OK)
+  async reconcile(@Param('walletId') walletId: string, @Req() request: HttpRequest): Promise<ReconciliationProps> {
+    const id = parseOrThrow(uuidField, walletId, 'walletId');
+    return this.reconcileWallet.execute({ walletId: id, correlationId: correlationIdOf(request) });
   }
 }

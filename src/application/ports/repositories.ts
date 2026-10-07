@@ -1,4 +1,5 @@
 import type { InboxMessage } from '../../domain/inbox/inbox-message.js';
+import type { Money } from '../../domain/money/money.js';
 import type { OutboxMessage } from '../../domain/outbox/outbox-message.js';
 import type { WagerTransaction } from '../../domain/wager/wager-transaction.js';
 import type { Wallet } from '../../domain/wallet/wallet.js';
@@ -76,6 +77,19 @@ export interface LedgerRepository {
   append(entry: WalletLedgerEntry): Promise<void>;
   /** Entries of the wallet with wallet_version > afterVersion, oldest first, at most limit. */
   listAfterVersion(walletId: string, afterVersion: number, limit: number): Promise<WalletLedgerEntry[]>;
+  /**
+   * The stored balance and the ledger totals of a wallet, read by ONE statement (one
+   * snapshot, no lock): a commit in between cannot make them disagree. undefined when
+   * the wallet does not exist.
+   */
+  reconciliationTotals(walletId: string): Promise<ReconciliationTotals | undefined>;
+}
+
+export interface ReconciliationTotals {
+  readonly storedBalance: Money;
+  readonly totalCredits: Money;
+  readonly totalDebits: Money;
+  readonly entries: number;
 }
 
 /** What one publisher asks for when it claims a batch of the outbox. */
