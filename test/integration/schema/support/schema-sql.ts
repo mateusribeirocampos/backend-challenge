@@ -169,8 +169,16 @@ export function ledgerRow(overrides: Row): Row {
  * Opens a wallet with a positive balance exactly as the application will: wallet row,
  * OPENING transaction and its CREDIT entry (0.00 -> balance, version 1) in one commit.
  */
-export async function openWalletWithBalance(orm: MikroORM, balance: string): Promise<WalletRef & { openingId: string }> {
-  const wallet = walletRow({ balance_amount: balance });
+export async function openWalletWithBalance(
+  orm: MikroORM,
+  balance: string,
+  ids: { id?: string; playerId?: string } = {},
+): Promise<WalletRef & { openingId: string }> {
+  const wallet = walletRow({
+    balance_amount: balance,
+    ...(ids.id === undefined ? {} : { id: ids.id }),
+    ...(ids.playerId === undefined ? {} : { player_id: ids.playerId }),
+  });
   const ref = { id: String(wallet.id), playerId: String(wallet.player_id) };
   const opening = transactionRow(ref, {
     provider_id: 'internal',
