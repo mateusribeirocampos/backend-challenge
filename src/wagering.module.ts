@@ -7,6 +7,7 @@ import { TRANSACTION_RUNNER, type TransactionRunner } from './application/ports/
 import { GetWagerTransaction } from './application/wagering/get-wager-transaction.js';
 import { ProcessWagerTransaction } from './application/wagering/process-wager-transaction.js';
 import { GetWallet } from './application/wallets/get-wallet.js';
+import { GetWalletLedger } from './application/wallets/get-wallet-ledger.js';
 import { OpenWallet } from './application/wallets/open-wallet.js';
 import { NoopProviderIdentity } from './infrastructure/auth/noop-provider-identity.js';
 import { MikroOrmTransactionRunner } from './infrastructure/persistence/mikro-orm-transaction-runner.js';
@@ -42,6 +43,11 @@ import { APP_CONFIG, type AppConfig } from './infrastructure/config/app-config.j
     {
       provide: GetWallet,
       useFactory: (runner: TransactionRunner) => new GetWallet(runner),
+      inject: [TRANSACTION_RUNNER],
+    },
+    {
+      provide: GetWalletLedger,
+      useFactory: (runner: TransactionRunner) => new GetWalletLedger(runner),
       inject: [TRANSACTION_RUNNER],
     },
     {

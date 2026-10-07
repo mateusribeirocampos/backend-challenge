@@ -74,6 +74,8 @@ export interface DuePendingReference {
 
 export interface LedgerRepository {
   append(entry: WalletLedgerEntry): Promise<void>;
+  /** Entries of the wallet with wallet_version > afterVersion, oldest first, at most limit. */
+  listAfterVersion(walletId: string, afterVersion: number, limit: number): Promise<WalletLedgerEntry[]>;
 }
 
 /** What one publisher asks for when it claims a batch of the outbox. */
