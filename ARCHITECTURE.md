@@ -64,6 +64,7 @@ Camadas: `domain` (regras puras, só `decimal.js`) ← `application` (casos de u
 - A unidade de concorrência é a wallet; não há lock global nem estado em memória.
 - Cenário do enunciado (saldo 100, duas apostas de 80 em paralelo): uma processada, outra `INSUFFICIENT_FUNDS`, saldo 20,00, um débito.
 - Prova: `test/integration/wagering/concurrency.test.ts` (HTTP real, `Promise.all`) e `test/integration/schema/wallet-lock-order.schema.test.ts` (duas conexões; com `FOR UPDATE` dá deadlock, com `FOR NO KEY UPDATE` não). Trocar o lock ou removê-lo faz os testes falharem.
+- Três processos reais de `src/main.ts` (HTTP, consumer, publisher e worker em cada um) sobre o mesmo banco e as mesmas filas: `test/integration/multi-instance`. Uma instância morre com `SIGKILL` segurando uma mensagem e uma requisição; o provedor reenvia com a mesma chave, a mensagem volta depois do visibility timeout, e no fim cada wallet bate com o ledger.
 
 ### Idempotência persistente
 - Fonte da verdade: `UNIQUE (idempotency_key)` e `UNIQUE (provider_id, external_transaction_id)`. Sem cache.
@@ -98,15 +99,15 @@ Camadas: `domain` (regras puras, só `decimal.js`) ← `application` (casos de u
 | Atomicidade wallet, ledger, inbox e outbox | ✅ | `atomicity-and-outbox.test.ts`, `consumer-processing.test.ts` |
 | Inbox e redelivery; retry e DLQ | ✅ | `test/integration/messaging` |
 | Publishers concorrentes na mesma outbox | ✅ | `outbox-publisher.test.ts`, `outbox-publisher-crash.test.ts` |
-| Recuperação após reinicialização | ⏳ pendente | |
+| Recuperação após reinicialização | ✅ | `multi-instance/restart.test.ts` (`SIGTERM` em todas, processos novos terminam outbox e referência pendente) |
 | 1. Mesma aposta 50 vezes em paralelo | ✅ | `concurrency.test.ts` |
 | 2. Disputa de saldo (2 × 80) | ✅ | `concurrency.test.ts`, `wallet-lock-order.schema.test.ts` |
 | 3. Wallets distintas em paralelo | ✅ | `concurrency.test.ts`, `consumer-message-groups.test.ts` |
-| 4. Três ou mais processos simultâneos | ⏳ pendente | |
+| 4. Três ou mais processos simultâneos | ✅ | `multi-instance/three-instances.test.ts` |
 | 5. Worker morto depois do commit e antes do ack | ✅ | `consumer-crash-before-ack.test.ts` |
 | 6. Dois publishers na mesma outbox | ✅ | `outbox-publisher.test.ts` |
 | 7. REFUND ou ROLLBACK antes da referência | ✅ | `pending-reference-worker.test.ts`, `consumer-reference-before-bet.test.ts` |
-| 8. Reinício com consistência final | ⏳ pendente | |
+| 8. Reinício com consistência final | ✅ | `multi-instance/restart.test.ts` (`SIGKILL` com trabalho em mãos, processo substituto) |
 
 ## 5. Interpretações do enunciado
 
