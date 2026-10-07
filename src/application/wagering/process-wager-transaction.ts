@@ -13,9 +13,11 @@ import { WagerTransactionStatus } from '../../domain/wager/wager-transaction-sta
 import { WagerTransaction } from '../../domain/wager/wager-transaction.js';
 import type { WagerTransactionKind } from '../../domain/wager/wager-transaction-kind.js';
 import type { Wallet } from '../../domain/wallet/wallet.js';
+import { InboxMessage } from '../../domain/inbox/inbox-message.js';
 import {
   ExternalTransactionIdConflictError,
   IdempotencyKeyConflictError,
+  MessageIdConflictError,
   WalletNotFoundError,
 } from '../errors.js';
 import type { Clock } from '../ports/clock.js';
@@ -34,17 +36,38 @@ export interface ProcessWagerTransactionCommand extends WagerPayload {
   readonly causationId?: string | undefined;
 }
 
+/** Which SQS message delivered the operation (spec 10). Not used by HTTP. */
+export interface MessageDelivery {
+  /** The logical consumer, the same on every instance (inbox key, part 1). */
+  readonly consumerName: string;
+  /** envelope.messageId, stable across redeliveries (inbox key, part 2). */
+  readonly messageId: string;
+  /** Hash of the envelope data: a redelivery has the same; a reused messageId does not. */
+  readonly payloadHash: string;
+}
+
+export interface DeliveryResult {
+  /** true: the inbox already had this message, so nothing was processed again. */
+  readonly duplicateMessage: boolean;
+  /** The stored result of the operation (a replay view when anything was a duplicate). */
+  readonly result: WagerResultView;
+}
+
 /**
- * Processes one provider operation. Shared by POST /wagering/transactions and, later,
- * by the SQS consumer. Everything below runs in ONE SQL transaction (ADR-002, ADR-003):
+ * Processes one provider operation. The same code serves POST /wagering/transactions
+ * (execute) and the SQS consumer (executeDelivery). Everything below runs in ONE SQL
+ * transaction (ADR-002, ADR-003, ADR-005):
  *
+ *   0. SQS only: INSERT the inbox row ... ON CONFLICT DO NOTHING
+ *        - not inserted -> this message was already processed: answer, change nothing;
  *   1. insert-first: INSERT the PENDING row ... ON CONFLICT DO NOTHING
  *        - not inserted -> replay (same payload hash) or conflict (different hash);
  *   2. lock the wallet row: SELECT ... FOR NO KEY UPDATE (lock_timeout 2s);
  *   3. resolve the reference and whether it was already reversed;
  *   4. applyWagerTransaction (pure domain rules);
- *   5. write wallet, transaction outcome, ledger entry and outbox events;
- *   6. COMMIT (the runner). Any error before it rolls back all of the above.
+ *   5. write wallet, transaction outcome, ledger entry and outbox events
+ *      (SQS: and mark the inbox row processed);
+ *   6. COMMIT (the runner). Any error before it rolls back all of the above, inbox included.
  */
 export class ProcessWagerTransaction {
   constructor(
@@ -53,9 +76,36 @@ export class ProcessWagerTransaction {
     private readonly ids: IdGenerator,
   ) {}
 
+  /** HTTP entry: the Idempotency-Key is the only deduplication. */
   async execute(command: ProcessWagerTransactionCommand): Promise<WagerResultView> {
-    // Contract checks run before any I/O: an invalid payload never opens a transaction.
-    const transaction = WagerTransaction.create({
+    const transaction = this.newTransaction(command);
+    return this.runner.run((repositories) => this.decide(repositories, transaction, command));
+  }
+
+  /**
+   * SQS entry: the inbox row deduplicates the MESSAGE, the idempotency key the OPERATION.
+   * Both are written in the same transaction as the effect, so a message that was
+   * committed is never processed again, even if its ack never reached SQS.
+   */
+  async executeDelivery(command: ProcessWagerTransactionCommand, delivery: MessageDelivery): Promise<DeliveryResult> {
+    const transaction = this.newTransaction(command);
+    const inbox = InboxMessage.receive({ ...delivery, receivedAt: this.clock.now() });
+
+    return this.runner.run(async (repositories) => {
+      const isFirstDelivery = await repositories.inbox.insertIfAbsent(inbox);
+      if (!isFirstDelivery) {
+        return { duplicateMessage: true, result: await this.answerRedelivery(repositories, inbox, transaction) };
+      }
+      const result = await this.decide(repositories, transaction, command);
+      inbox.markProcessed(this.clock.now());
+      await repositories.inbox.saveProcessed(inbox);
+      return { duplicateMessage: false, result };
+    });
+  }
+
+  /** Contract checks run before any I/O: an invalid payload never opens a transaction. */
+  private newTransaction(command: ProcessWagerTransactionCommand): WagerTransaction {
+    return WagerTransaction.create({
       id: this.ids.newId(),
       providerId: command.providerId,
       externalTransactionId: command.externalTransactionId,
@@ -70,14 +120,45 @@ export class ProcessWagerTransaction {
       referenceExternalTransactionId: command.referenceExternalTransactionId ?? undefined,
       createdAt: this.clock.now(),
     });
+  }
 
-    return this.runner.run(async (repositories) => {
-      const isNewOperation = await repositories.transactions.insertIfAbsent(transaction);
-      if (!isNewOperation) {
-        return this.answerExistingOperation(repositories, transaction);
-      }
-      return this.process(repositories, transaction, command);
-    });
+  /** Steps 1 to 5, inside the transaction the caller opened. */
+  private async decide(
+    repositories: Repositories,
+    transaction: WagerTransaction,
+    command: ProcessWagerTransactionCommand,
+  ): Promise<WagerResultView> {
+    const isNewOperation = await repositories.transactions.insertIfAbsent(transaction);
+    if (!isNewOperation) {
+      return this.answerExistingOperation(repositories, transaction);
+    }
+    return this.process(repositories, transaction, command);
+  }
+
+  /**
+   * The inbox insert did not happen: the row was committed by an earlier delivery (if
+   * that delivery was still running, the insert waited for its commit). Its effect is
+   * committed too, so the answer is the stored result of the operation.
+   */
+  private async answerRedelivery(
+    repositories: Repositories,
+    inbox: InboxMessage,
+    submitted: WagerTransaction,
+  ): Promise<WagerResultView> {
+    const stored = await repositories.inbox.find(inbox.consumerName, inbox.messageId);
+    if (stored === undefined) {
+      throw new DomainInvariantError(`Inbox message ${inbox.messageId} vanished after the insert`);
+    }
+    if (!stored.matchesPayload(inbox.payloadHash)) {
+      throw new MessageIdConflictError(inbox.consumerName, inbox.messageId);
+    }
+    // Same data means the same idempotency key, and the inbox row only commits together
+    // with an operation stored under that key.
+    const operation = await repositories.transactions.findByIdempotencyKey(submitted.idempotencyKey);
+    if (operation === undefined) {
+      throw new DomainInvariantError(`Inbox message ${inbox.messageId} has no operation ${submitted.idempotencyKey}`);
+    }
+    return toWagerResultView(operation, true);
   }
 
   private async process(

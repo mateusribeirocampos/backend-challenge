@@ -13,6 +13,8 @@ export class MessagingModule implements OnApplicationShutdown {
   static register(config: SqsConfig): DynamicModule {
     return {
       module: MessagingModule,
+      // One SQS client per process, used by readiness and by the consumer module.
+      global: true,
       providers: [
         { provide: SQS_CLIENT, useFactory: () => createSqsClient(config) },
         {

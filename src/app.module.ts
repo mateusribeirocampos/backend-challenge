@@ -4,11 +4,13 @@ import { DEPENDENCY_CHECKS, type DependencyCheck } from './application/health/ch
 import { APP_CONFIG, type AppConfig } from './infrastructure/config/app-config.js';
 import { MessagingModule } from './infrastructure/messaging/messaging.module.js';
 import { SqsQueueCheck } from './infrastructure/messaging/sqs-queue-check.js';
+import { ObservabilityModule } from './infrastructure/observability/observability.module.js';
 import { DatabaseCheck } from './infrastructure/persistence/database-check.js';
 import { PersistenceModule } from './infrastructure/persistence/persistence.module.js';
 import { ApiExceptionFilter } from './interfaces/http/api-exception.filter.js';
 import { CorrelationIdMiddleware } from './interfaces/http/correlation-id.middleware.js';
 import { HealthController } from './interfaces/http/health.controller.js';
+import { WagerConsumerModule } from './wager-consumer.module.js';
 import { WageringModule } from './wagering.module.js';
 
 /**
@@ -20,7 +22,13 @@ export class AppModule implements NestModule {
   static register(config: AppConfig): DynamicModule {
     return {
       module: AppModule,
-      imports: [PersistenceModule.register(config.database), MessagingModule.register(config.sqs), WageringModule],
+      imports: [
+        ObservabilityModule,
+        PersistenceModule.register(config.database),
+        MessagingModule.register(config.sqs),
+        WageringModule,
+        WagerConsumerModule.register(config.sqs),
+      ],
       controllers: [HealthController],
       providers: [
         { provide: APP_CONFIG, useValue: config },

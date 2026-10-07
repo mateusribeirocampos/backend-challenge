@@ -1,10 +1,12 @@
 # Local environment only. Credentials below are dummy values for containers on this machine.
 #
 # docker compose up -d                                     -> postgres + SQS emulator (dev and tests)
-# docker compose --profile app up -d --build --scale app=3 -> also runs 3 app instances
+# docker compose --profile app up -d --build --scale app=3 -> also runs 3 app instances,
+#                                                             each with the SQS consumer on
 #
-# The app instances live behind the "app" profile so they do not consume test messages
-# from the queues while `bun test` runs on the host.
+# The app instances live behind the "app" profile so `docker compose up -d` starts only
+# the infrastructure the tests need. The tests create their own queues, so a running
+# app instance does not take their messages either.
 
 name: wagering
 
@@ -64,6 +66,10 @@ services:
     environment:
       DATABASE_HOST: postgres
       SQS_ENDPOINT: http://sqs:4566
+      SQS_CONSUMER_ENABLED: "true"
+    # SIGTERM first; SIGKILL only after this. Longer than SQS_CONSUMER_SHUTDOWN_TIMEOUT_SECONDS (15 s),
+    # so the consumer can finish the messages in flight and give back the others.
+    stop_grace_period: 20s
     # Container port only: Docker picks a free host port for each replica,
     # so --scale app=3 does not collide. `docker compose port --index 2 app 3000` shows it.
     ports:
