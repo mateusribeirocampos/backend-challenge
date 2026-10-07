@@ -15,6 +15,9 @@ export const INTERNAL_PROVIDER_ID = 'internal';
 /** Separates the provider namespace from the rest of an idempotency key: "provider-a:transaction-123". */
 export const IDEMPOTENCY_NAMESPACE_SEPARATOR = ':';
 
+/** U+0000 to U+001F and U+007F: the C0 control characters and DEL. */
+const CONTROL_CHARACTER = /[\u0000-\u001F\u007F]/;
+
 /** The transaction cannot be created as submitted. Never stored; the payload must be fixed. */
 export class InvalidWagerTransactionError extends DomainError {
   constructor(
@@ -316,6 +319,10 @@ export class WagerTransaction {
         throw new InvalidWagerTransactionError(ContractViolationCode.MissingField, `${field} is required`);
       }
     }
+    WagerTransaction.assertNoControlCharacters({
+      ...required,
+      referenceExternalTransactionId: props.referenceExternalTransactionId,
+    });
 
     if (!isWagerTransactionKind(props.kind)) {
       throw new InvalidWagerTransactionError(ContractViolationCode.UnknownKind, `Unknown kind ${String(props.kind)}`);
@@ -336,6 +343,24 @@ export class WagerTransaction {
 
     WagerTransaction.assertReferenceShape(props);
     WagerTransaction.assertAmount(props.kind, props.money);
+  }
+
+  /**
+   * No control characters (U+0000 to U+001F and U+007F) in any text field. A NUL cannot
+   * be stored in a PostgreSQL text column (the server answers 08P01), and the others
+   * have no place in an id. The HTTP schema refuses them too; this check is the one
+   * every entry point shares, so a SQS message gets the same contract violation
+   * instead of a database error.
+   */
+  private static assertNoControlCharacters(fields: Readonly<Record<string, string | undefined>>): void {
+    for (const [field, value] of Object.entries(fields)) {
+      if (value !== undefined && CONTROL_CHARACTER.test(value)) {
+        throw new InvalidWagerTransactionError(
+          ContractViolationCode.InvalidFormat,
+          `${field} must not contain control characters`,
+        );
+      }
+    }
   }
 
   /**
