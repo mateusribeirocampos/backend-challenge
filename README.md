@@ -110,6 +110,25 @@ Na AWS, o mesmo é feito em lote com `StartMessageMoveTask` (ou pelo console, "S
 
 É seguro reenviar sem saber se a mensagem já teve efeito: o envelope mantém o `messageId`. Se ela já tinha sido aplicada (por exemplo, foi para a DLQ pela redrive depois de um commit cujo ack se perdeu), a inbox reconhece o `messageId` e o consumer só confirma. Se nunca foi aplicada, é processada normalmente.
 
+### Eventos publicados, referências pendentes, ledger e reconciliação
+
+Cada instância também roda o publisher da outbox (`OUTBOX_PUBLISHER_ENABLED`) e o worker de `PENDING_REFERENCE` (`PENDING_REFERENCE_WORKER_ENABLED`), os dois ligados por padrão; as outras variáveis estão no `.env.example`. Com a aplicação de pé:
+
+```bash
+# eventos publicados (WagerTransactionProcessed, WalletBalanceChanged...), um por linha
+docker compose exec -T sqs awslocal sqs receive-message \
+  --queue-url http://localhost:4566/000000000000/wagering-events.fifo \
+  --max-number-of-messages 10 --attribute-names All --query 'Messages[].Body'
+
+# ledger da wallet, 2 por página; repita com ?cursor=<nextCursor> até ele vir null
+curl -s 'localhost:3000/wallets/<id da wallet>/ledger?limit=2'
+
+# saldo guardado x saldo recalculado pelo ledger
+curl -s -X POST localhost:3000/wallets/<id da wallet>/reconciliation
+```
+
+Um REFUND enviado antes da sua BET responde `202` com `PENDING_REFERENCE`. O worker confere de novo com intervalos que dobram (1, 2, 4 s...) até o teto de 60 s, então depois que a BET chega a próxima conferência pode levar até 60 s. Exemplo: REFUND em t = 0 e BET em t = 70 s; a conferência seguinte acontece entre cerca de 93 s e 123 s. Depois disso, reenviar o REFUND com a mesma chave devolve `200` com o resultado final. Se a referência não existir em 15 conferências (cerca de 4,5 a 9 min), o REFUND é rejeitado com `REFERENCE_NOT_FOUND`.
+
 ## Comandos
 
 | Comando | O que faz |
@@ -179,6 +198,14 @@ Tabela completa, requisito por requisito, com o teste que prova cada um. O resum
 | `SIGTERM`: mensagens em andamento terminam, as não iniciadas voltam para a fila | `bun test test/integration/messaging/consumer-shutdown.test.ts` (roda `src/main.ts` num processo filho) | `src/wager-consumer.module.ts`, `src/interfaces/messaging/sqs-wager-consumer.ts` (`stop`) |
 | Wallets diferentes em paralelo, a mesma wallet em ordem (FIFO por `MessageGroupId`) | `bun test test/integration/messaging/consumer-message-groups.test.ts` | `src/interfaces/messaging/sqs-wager-consumer.ts` |
 | Limite de tentativas antes da DLQ (`maxReceiveCount = 10`) | `bun test test/integration/messaging/consumer-transient-failure.test.ts`: com o banco inacessível e `maxReceiveCount` 2, a redrive move a mensagem para a DLQ, sem os atributos do consumer | `docker/ministack/init-queues.sh` |
+| Publishers concorrentes na mesma outbox: todo evento publicado, nenhum perdido, nenhum enviado duas vezes, ordem por wallet | `bun test test/integration/messaging/outbox-publisher.test.ts` (dois apps, 48 eventos de 6 wallets) | `src/application/outbox/publish-outbox.ts`, `src/infrastructure/persistence/repositories/mikro-orm-outbox.repository.ts` (`claimBatch`) |
+| Publisher morto depois do claim (antes ou depois do envio): outra instância publica quando o lease vence, a cópia é descartada pela deduplicação | `bun test test/integration/messaging/outbox-publisher-crash.test.ts` (processo filho real com `SIGKILL`) | `src/infrastructure/messaging/sqs-event-publisher.ts` |
+| Falha do SQS na publicação: retry com backoff, a wallet espera o evento que falhou, publicado depois | `outbox-publisher.test.ts` (fila de eventos criada só depois da primeira falha) | `src/domain/outbox/outbox-message.ts` (`scheduleRetry`) |
+| Um evento publicado não muda, e um não publicado não pode ser apagado | `bun test test/integration/schema/inbox-outbox.schema.test.ts` | migration `outbox_publication` |
+| REFUND ou ROLLBACK antes da referência, por HTTP e por SQS: `202`, a BET chega, o worker processa, o replay devolve o resultado final | `bun test test/integration/wagering/pending-reference-worker.test.ts test/integration/messaging/consumer-reference-before-bet.test.ts` | `src/application/wagering/resolve-pending-references.ts`, `src/application/wagering/apply-and-record.ts` |
+| Referência que nunca chega: `REJECTED` com `REFERENCE_NOT_FOUND` e evento `WagerTransactionRejected`; referência que existe e ainda espera mantém a dependente esperando (cadeia ROLLBACK, REFUND, BET atrasada); dois workers na mesma linha resolvem uma vez; uma linha que falha (lock ou COMMIT) não segura as outras | `pending-reference-worker.test.ts` e `bun test test/unit/domain/wager/reference-wait-policy.test.ts` | `src/domain/wager/reference-wait-policy.ts` |
+| Ledger paginado por cursor estável e opaco, sem buraco nem repetição com lançamentos novos; cursor ou limite inválido é `400` | `bun test test/integration/wagering/ledger-pagination.test.ts test/unit/interfaces/http` | `src/interfaces/http/ledger-cursor.ts`, `src/application/wallets/get-wallet-ledger.ts` |
+| Reconciliação: divergência logada, contada e sinalizada, nunca corrigida | `bun test test/integration/wagering/reconciliation.test.ts test/unit/domain/wallet/wallet-reconciliation.test.ts` | `src/application/wallets/reconcile-wallet.ts`, `src/domain/wallet/wallet-reconciliation.ts` |
 
 </details>
 
