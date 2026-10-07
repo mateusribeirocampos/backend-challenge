@@ -27,7 +27,7 @@ bun test
 O `docker compose up -d` cria:
 
 - PostgreSQL 17 com dois bancos: `wagering` (desenvolvimento) e `wagering_test` (testes de integração).
-- MiniStack com as filas `wager-transactions.fifo`, `wager-transactions-dlq.fifo` (DLQ, `maxReceiveCount=5`) e `wagering-events.fifo` (eventos publicados pela outbox).
+- MiniStack com as filas `wager-transactions.fifo`, `wager-transactions-dlq.fifo` (DLQ, `maxReceiveCount=10`) e `wagering-events.fifo` (eventos publicados pela outbox).
 
 Os testes de integração usam o PostgreSQL e o SQS reais dos containers. Nenhum dos dois é substituído por mock.
 
@@ -62,6 +62,18 @@ Os testes de integração usam o PostgreSQL e o SQS reais dos containers. Nenhum
 | Falhas transitórias do banco viram 503 com `Retry-After`; violação de constraint, estouro numérico e `08P01` não | `bun test test/unit/infrastructure` e o teste de lock timeout em `http-status-mapping.test.ts` | `src/infrastructure/persistence/database-error-classifier.ts` |
 | Crédito acima do maior saldo que a coluna guarda vira rejeição `BALANCE_LIMIT_EXCEEDED`, não erro 500 | `bun test test/unit/domain` e `http-status-mapping.test.ts` | `src/domain/wallet/wallet.ts` (`canCredit`) |
 | Ponto de extensão de autenticação | leitura do código | `src/interfaces/http/provider-auth.guard.ts`, `src/application/ports/provider-identity.ts` |
+| Consumer SQS reutiliza o mesmo caso de uso do HTTP; mensagem processada uma vez, com saldo, um lançamento e linha na inbox | `bun test test/integration/messaging/consumer-processing.test.ts` | `src/application/wagering/process-wager-transaction.ts` (`executeDelivery`), `src/interfaces/messaging/wager-message-handler.ts` |
+| Inbox persistente por `(consumerName, messageId)`: o mesmo `messageId` duas vezes, em sequência ou em paralelo, tem um efeito só | mesmo teste | `src/infrastructure/persistence/repositories/mikro-orm-inbox.repository.ts`, `src/domain/inbox/inbox-message.ts` |
+| A mesma operação por HTTP e por SQS (outro `messageId`, mesma chave) tem um efeito só | mesmo teste | chave de idempotência, seção Idempotência do `ARCHITECTURE.md` |
+| Envelope da mensagem (seção 10) validado com as mesmas regras do HTTP; hash do `data` para a inbox | `bun test test/unit/interfaces/messaging` | `src/interfaces/messaging/wager-transaction-message.ts` |
+| Erro de negócio com ack; transitório com retry e backoff; permanente (inclusive conflitos de chave, de `externalTransactionId` e de `messageId`) direto para a DLQ com o motivo | `bun test test/unit/interfaces/messaging` (tabela) e `consumer-processing.test.ts`, `consumer-transient-failure.test.ts` | `src/interfaces/messaging/processing-failure.ts`, `src/interfaces/messaging/retry-backoff.ts` |
+| Lock timeout, deadlock e falha de serialização repetidos no próprio processo, sem devolver as mensagens seguintes da wallet para a fila | `bun test test/unit/application/retry-on-contention.test.ts` e o teste da wallet disputada em `consumer-message-groups.test.ts` | `src/application/retry-on-contention.ts` |
+| Mensagem de uma wallet criada depois dela: retry até a wallet existir | `consumer-transient-failure.test.ts` | `src/interfaces/messaging/processing-failure.ts` |
+| Caracteres de controle recusados no domínio, para qualquer entrada | `bun test test/unit/domain/wager` | `src/domain/wager/wager-transaction.ts` |
+| Ack só depois do commit; processo morto depois do commit e antes do ack não duplica nada | `bun test test/integration/messaging/consumer-crash-before-ack.test.ts` (processo filho real com `SIGKILL`) | `src/interfaces/messaging/sqs-wager-consumer.ts` |
+| `SIGTERM`: mensagens em andamento terminam, as não iniciadas voltam para a fila | `bun test test/integration/messaging/consumer-shutdown.test.ts` (roda `src/main.ts` num processo filho) | `src/wager-consumer.module.ts`, `src/interfaces/messaging/sqs-wager-consumer.ts` (`stop`) |
+| Wallets diferentes em paralelo, a mesma wallet em ordem (FIFO por `MessageGroupId`) | `bun test test/integration/messaging/consumer-message-groups.test.ts` | `src/interfaces/messaging/sqs-wager-consumer.ts` |
+| Limite de tentativas antes da DLQ (`maxReceiveCount = 10`) | `bun test test/integration/messaging/consumer-transient-failure.test.ts`: com o banco inacessível e `maxReceiveCount` 2, a redrive move a mensagem para a DLQ, sem os atributos do consumer | `docker/ministack/init-queues.sh` |
 
 ### Conferindo à mão
 
@@ -88,7 +100,59 @@ docker compose ps app                      # as três ficam healthy
 docker compose port --index 2 app 3000     # porta do host da instância 2
 ```
 
-O serviço `migrate` roda as migrations uma vez antes das instâncias subirem. As instâncias ficam no profile `app` para não consumirem mensagens das filas enquanto `bun test` roda no host.
+O serviço `migrate` roda as migrations uma vez antes das instâncias subirem. Cada instância roda também o consumer da fila `wager-transactions.fifo`. Os testes criam filas próprias, então as instâncias podem ficar de pé enquanto `bun test` roda.
+
+### Consumer SQS
+
+O consumer roda dentro do processo da aplicação, ligado por `SQS_CONSUMER_ENABLED` (padrão `true`). Com `bun run start` ou com o profile `app` do Compose ele já está consumindo. Para mandar uma mensagem à mão (troque os ids pelos da wallet criada antes):
+
+```bash
+docker compose exec -T sqs awslocal sqs send-message \
+  --queue-url http://localhost:4566/000000000000/wager-transactions.fifo \
+  --message-group-id <id da wallet> --message-deduplication-id msg-1 \
+  --message-body '{"messageId":"msg-1","type":"WagerTransactionRequested","occurredAt":"2026-10-07T12:00:00.000Z","data":{"providerId":"provider-a","externalTransactionId":"tx-1","idempotencyKey":"provider-a:tx-1","playerId":"<player>","walletId":"<id da wallet>","roundId":"round-1","gameId":"fortune-chimp","kind":"BET","money":{"amount":"25.00","currency":"BRL"}}}'
+
+docker compose exec -T sqs awslocal sqs receive-message \
+  --queue-url http://localhost:4566/000000000000/wager-transactions-dlq.fifo \
+  --message-attribute-names All          # o que foi para a DLQ, com reason e errorCode
+```
+
+Os logs do consumer são uma linha JSON por evento (`wager_message.processed`, `wager_message.duplicate`, `wager_consumer.dead_lettered`...). `docker compose stop app` manda `SIGTERM`: o consumer termina o que está em andamento e devolve o resto para a fila.
+
+| Variável | Padrão | Uso |
+|---|---|---|
+| `SQS_CONSUMER_ENABLED` | `true` | liga o consumer no processo da API |
+| `SQS_WAGER_DLQ_NAME` | `wager-transactions-dlq.fifo` | DLQ para onde o consumer manda os erros permanentes |
+| `SQS_CONSUMER_VISIBILITY_TIMEOUT_SECONDS` | `30` | quanto tempo uma mensagem recebida fica invisível |
+| `SQS_CONSUMER_WAIT_TIME_SECONDS` | `10` | long polling |
+| `SQS_CONSUMER_SHUTDOWN_TIMEOUT_SECONDS` | `15` | espera máxima no `SIGTERM`; precisa ser maior que o long polling |
+| `SQS_CONSUMER_RETRY_BASE_SECONDS`, `SQS_CONSUMER_RETRY_MAX_SECONDS` | `5`, `300` | backoff de erro transitório |
+
+#### Reprocessar uma mensagem da DLQ
+
+Depois de corrigir a causa (o produtor, o payload, um bug), a mensagem volta para a fila de origem:
+
+```bash
+# 1. ler a mensagem da DLQ: guarde o Body, o MessageGroupId e o ReceiptHandle
+docker compose exec -T sqs awslocal sqs receive-message \
+  --queue-url http://localhost:4566/000000000000/wager-transactions-dlq.fifo \
+  --message-attribute-names All --attribute-names All
+
+# 2. enviar o mesmo Body para a fila de origem, no mesmo grupo, com um id de deduplicação novo
+docker compose exec -T sqs awslocal sqs send-message \
+  --queue-url http://localhost:4566/000000000000/wager-transactions.fifo \
+  --message-group-id <MessageGroupId> --message-deduplication-id redrive-<algo único> \
+  --message-body '<Body>'
+
+# 3. apagar da DLQ
+docker compose exec -T sqs awslocal sqs delete-message \
+  --queue-url http://localhost:4566/000000000000/wager-transactions-dlq.fifo \
+  --receipt-handle '<ReceiptHandle>'
+```
+
+Na AWS, o mesmo é feito em lote com `StartMessageMoveTask` (ou pelo console, "Start DLQ redrive").
+
+É seguro reenviar sem saber se a mensagem já teve efeito: o envelope mantém o `messageId`. Se ela já tinha sido aplicada (por exemplo, foi para a DLQ pela redrive depois de um commit cujo ack se perdeu), a inbox reconhece o `messageId` e o consumer só confirma. Se nunca foi aplicada, é processada normalmente.
 
 ## Comandos
 
