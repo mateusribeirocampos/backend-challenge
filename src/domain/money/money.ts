@@ -18,8 +18,17 @@ export const MONEY_SCALE = 2;
  */
 const AMOUNT_PATTERN = /^(0|[1-9]\d{0,17})(\.\d{1,2})?$/;
 
-/** ISO-4217 shape: three uppercase letters (BRL, USD). */
+/** Three uppercase letters, the shape of an ISO-4217 code (BRL, USD). */
 const CURRENCY_PATTERN = /^[A-Z]{3}$/;
+/**
+ * ISO-4217 codes known to the runtime (Intl, ECMA-402). The table includes withdrawn
+ * codes (HRK), metals (XAU) and fund codes (USN), and it comes from the runtime's ICU
+ * data, so it can change with the runtime version. A shape that matches but is not in
+ * the table (ABC) is refused.
+ */
+const ISO_4217_CODES = new Set(Intl.supportedValuesOf('currency'));
+/** ISO-4217 codes that are not money a wallet can hold: XXX is "no currency", XTS is for testing. */
+const NON_MONETARY_CODES = new Set(['XXX', 'XTS']);
 
 export class InvalidMoneyError extends DomainError {
   readonly code = 'INVALID_MONEY';
@@ -127,8 +136,13 @@ export class Money {
   }
 
   private static parseCurrency(currency: unknown): string {
-    if (typeof currency !== 'string' || !CURRENCY_PATTERN.test(currency)) {
-      throw new InvalidMoneyError(`Invalid currency ${JSON.stringify(currency)}: expected ISO-4217 code like BRL`);
+    if (
+      typeof currency !== 'string' ||
+      !CURRENCY_PATTERN.test(currency) ||
+      !ISO_4217_CODES.has(currency) ||
+      NON_MONETARY_CODES.has(currency)
+    ) {
+      throw new InvalidMoneyError(`Invalid currency ${JSON.stringify(currency)}: expected an ISO-4217 currency code like BRL`);
     }
     return currency;
   }
