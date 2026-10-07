@@ -13,6 +13,8 @@ export interface RunningTestApp {
   readonly metrics: InMemoryMetrics;
   /** Every structured log line the app wrote, instead of printing them during the tests. */
   readonly logs: CapturingLogger;
+  /** A provider of this app instance (e.g. a use case), to drive it directly from a test. */
+  get<T>(token: string | symbol | (abstract new (...args: never[]) => T)): T;
   close(): Promise<void>;
 }
 
@@ -33,6 +35,7 @@ export async function startTestApp(config: AppConfig): Promise<RunningTestApp> {
     baseUrl,
     metrics: app.get<InMemoryMetrics>(METRICS, { strict: false }),
     logs,
+    get: (token) => app.get(token, { strict: false }),
     close: () => app.close(),
   };
 }

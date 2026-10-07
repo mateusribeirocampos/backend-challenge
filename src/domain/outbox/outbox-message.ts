@@ -1,5 +1,6 @@
 import type { IntegrationEvent } from '../events/integration-event.js';
 import { DomainInvariantError } from '../shared/domain-error.js';
+import { backoffDelayMs, type BackoffPolicy } from '../shared/exponential-backoff.js';
 
 export interface OutboxMessageState {
   /** Same as the event id, so the consumer can deduplicate a republished event. */
@@ -15,15 +16,10 @@ export interface OutboxMessageState {
 }
 
 /**
- * How far apart retries are. random is injectable so tests get exact delays.
+ * How far apart publish retries are (see backoffDelayMs).
  * Retry n (1, 2, 3...) waits between half and all of min(maxDelayMs, baseDelayMs * 2^(n-1)).
  */
-export interface RetryPolicy {
-  readonly baseDelayMs: number;
-  readonly maxDelayMs: number;
-  /** Returns a value in [0, 1]. */
-  readonly random: () => number;
-}
+export type RetryPolicy = BackoffPolicy;
 
 export const DEFAULT_RETRY_POLICY: RetryPolicy = {
   baseDelayMs: 1_000,
@@ -91,19 +87,7 @@ export class OutboxMessage {
   scheduleRetry(now: Date, policy: RetryPolicy = DEFAULT_RETRY_POLICY): void {
     this.assertPending('scheduleRetry');
     this.state.attempts += 1;
-    this.state.nextAttemptAt = new Date(now.getTime() + OutboxMessage.retryDelayMs(this.state.attempts, policy));
-  }
-
-  /**
-   * Exponential step capped at maxDelayMs, then "equal jitter": a random point in the
-   * upper half of the step. Many publishers that failed together (SQS down) do not
-   * all retry at the same instant, and no retry comes sooner than half the step.
-   */
-  private static retryDelayMs(attempt: number, policy: RetryPolicy): number {
-    const exponential = policy.baseDelayMs * 2 ** (attempt - 1);
-    const step = Math.min(policy.maxDelayMs, exponential);
-    const half = step / 2;
-    return Math.floor(half + policy.random() * half);
+    this.state.nextAttemptAt = new Date(now.getTime() + backoffDelayMs(this.state.attempts, policy));
   }
 
   private assertPending(operation: string): void {

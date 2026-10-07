@@ -2,6 +2,7 @@ import { type DynamicModule, type MiddlewareConsumer, Module, type NestModule } 
 import { APP_FILTER } from '@nestjs/core';
 import { DEPENDENCY_CHECKS, type DependencyCheck } from './application/health/check-readiness.js';
 import type { AppConfig } from './infrastructure/config/app-config.js';
+import { BackgroundWorkersModule } from './background-workers.module.js';
 import { AppConfigModule } from './infrastructure/config/app-config.module.js';
 import { MessagingModule } from './infrastructure/messaging/messaging.module.js';
 import { SqsQueueCheck } from './infrastructure/messaging/sqs-queue-check.js';
@@ -30,6 +31,7 @@ export class AppModule implements NestModule {
         MessagingModule.register(config.sqs),
         WageringModule,
         WagerConsumerModule.register(config.sqs),
+        BackgroundWorkersModule.register(config),
       ],
       controllers: [HealthController],
       providers: [

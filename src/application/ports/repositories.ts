@@ -56,8 +56,33 @@ export interface LedgerRepository {
   append(entry: WalletLedgerEntry): Promise<void>;
 }
 
+/** What one publisher asks for when it claims a batch of the outbox. */
+export interface OutboxClaim {
+  /** New for every claim. Only the holder of this token releases or reschedules the rows. */
+  readonly leaseToken: string;
+  /** How long the rows stay reserved for this publisher (database clock). */
+  readonly leaseMs: number;
+  /** At most this many events. */
+  readonly limit: number;
+}
+
 export interface OutboxRepository {
   add(messages: readonly OutboxMessage[]): Promise<void>;
+  /**
+   * Reserves a batch of due, unpublished events for this publisher (FOR UPDATE SKIP
+   * LOCKED, then a lease). A wallet is taken whole or not at all: only wallets whose
+   * OLDEST unpublished event is due and free, and then that event and the following
+   * ones of the same wallet. Returned in the order they were written.
+   */
+  claimBatch(claim: OutboxClaim): Promise<OutboxMessage[]>;
+  /** Writes publishedAt and clears the lease. false when another publisher had already marked it. */
+  markPublished(message: OutboxMessage): Promise<boolean>;
+  /** Writes attempts and nextAttemptAt and clears the lease, only if the lease is still this token's. */
+  saveRetry(message: OutboxMessage, leaseToken: string): Promise<boolean>;
+  /** Gives the events back untouched (no attempt counted), only where the lease is still this token's. */
+  releaseLease(messageIds: readonly string[], leaseToken: string): Promise<number>;
+  /** occurredAt of the oldest event not published yet, for the outbox lag. */
+  oldestPendingOccurredAt(): Promise<Date | undefined>;
 }
 
 export interface InboxRepository {

@@ -79,13 +79,18 @@ export function consumerConfig(queues: TestQueues, consumer: Partial<WagerConsum
   };
 }
 
-/** Environment for a child process running the app against the test queues. */
+/**
+ * Environment for a child process running the app against the test queues. Only the
+ * consumer runs: the outbox publisher would otherwise publish every event the other
+ * tests left in the test database.
+ */
 export function consumerEnv(queues: TestQueues, extra: Record<string, string> = {}): Record<string, string> {
   return {
     DATABASE_NAME: integrationConfig().database.dbName,
     SQS_WAGER_QUEUE_NAME: queues.name,
     SQS_WAGER_DLQ_NAME: queues.deadLetterName,
     SQS_CONSUMER_ENABLED: 'true',
+    OUTBOX_PUBLISHER_ENABLED: 'false',
     SQS_CONSUMER_WAIT_TIME_SECONDS: '1',
     ...extra,
   };

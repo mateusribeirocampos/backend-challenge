@@ -57,7 +57,8 @@ import { APP_CONFIG, type AppConfig } from './infrastructure/config/app-config.j
     },
     ProviderAuthGuard,
   ],
-  // The SQS consumer runs the same use case as POST /wagering/transactions.
-  exports: [ProcessWagerTransaction],
+  // The SQS consumer runs the same use case as POST /wagering/transactions; the
+  // background workers use the same transaction runner, clock and id generator.
+  exports: [ProcessWagerTransaction, TRANSACTION_RUNNER, CLOCK, ID_GENERATOR],
 })
 export class WageringModule {}
