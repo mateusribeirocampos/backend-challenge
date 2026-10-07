@@ -56,9 +56,27 @@ describe('Money.from: rejected input (spec 6.1)', () => {
     expect(() => Money.from(props)).toThrow(InvalidMoneyError);
   });
 
-  test.each(['brl', 'BR', 'BRLX', '', '123', 'R$'])('currency %p is not an ISO-4217 code', (currency) => {
+  test.each(['brl', 'BR', 'BRLX', '', '123', 'R$', 'ABC'])('currency %p is not a supported currency code', (currency) => {
     expect(() => Money.from({ amount: '1.00', currency })).toThrow(InvalidMoneyError);
     expect(() => Money.zero(currency)).toThrow(InvalidMoneyError);
+  });
+
+  // XXX means "no currency" and XTS is reserved for testing: both are ISO-4217 codes, but
+  // neither makes sense for a wallet balance.
+  test.each(['XXX', 'XTS'])('ISO-4217 code %p is refused because it is not money a wallet can hold', (currency) => {
+    expect(() => Money.from({ amount: '1.00', currency })).toThrow(InvalidMoneyError);
+    expect(() => Money.zero(currency)).toThrow(InvalidMoneyError);
+  });
+});
+
+describe('Money.from: currency codes from the runtime ISO-4217 table', () => {
+  test.each(['BRL', 'USD', 'EUR', 'JPY'])('current currency %p is accepted', (currency) => {
+    expect(Money.from({ amount: '1.00', currency }).currency).toBe(currency);
+  });
+
+  // The runtime table also keeps withdrawn codes (HRK became EUR in 2023). Documented, not refused.
+  test('a withdrawn ISO-4217 code is still in the table and is accepted', () => {
+    expect(Money.from({ amount: '1.00', currency: 'HRK' }).currency).toBe('HRK');
   });
 });
 

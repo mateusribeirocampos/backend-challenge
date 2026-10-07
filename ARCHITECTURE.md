@@ -36,6 +36,7 @@ Os casos de uso (`src/application/wallets`, `src/application/wagering`) são cla
 - **Escala:** sempre duas casas na saída (`"25.00"`).
 - **Arredondamento:** não existe no fluxo normal. A entrada tem no máximo duas casas e as operações são soma e subtração, que preservam a escala. Mais de duas casas é recusado, não arredondado: arredondar em silêncio mudaria o valor enviado pelo provedor.
 - **Moeda:** somar ou comparar moedas diferentes lança erro de domínio. O desafio usa só BRL, mas o modelo é multimoeda e o conflito é testado.
+- **Código de moeda:** precisa ter o formato ISO 4217 (três letras maiúsculas) **e** existir na tabela ISO 4217 do runtime (`Intl.supportedValuesOf('currency')`, ECMA-402). Assim, `ABC` é recusado. Essa tabela inclui códigos históricos (`HRK`), metais (`XAU`) e fundos (`USN`), que são aceitos. `XXX` ("sem moeda") e `XTS` (reservado para testes) são recusados, porque não são dinheiro que uma wallet possa guardar. A tabela vem dos dados ICU do runtime e pode mudar com a versão; a CI fixa a versão do Bun. O banco confere só o formato. Em produção, a lista seria um catálogo próprio, versionado a partir da publicação oficial da SIX, a agência que mantém a ISO 4217.
 - **Persistência:** colunas `numeric(20,2)`, que o driver devolve como string. O caminho do banco até o `Money` também não passa por `number`.
 - **Limite:** no máximo 18 dígitos inteiros, para que um valor que não cabe na coluna seja erro de domínio e não estouro no banco.
 
