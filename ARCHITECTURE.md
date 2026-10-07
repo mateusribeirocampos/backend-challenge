@@ -59,6 +59,7 @@ Camadas: `domain` (regras puras, só `decimal.js`) ← `application` (casos de u
 - `BET` debita (`INSUFFICIENT_FUNDS`); `WIN` e `REFUND` creditam; `LOSS` não move saldo; `ROLLBACK` inverte a referência (`REVERSAL_WOULD_OVERDRAW` quando faltaria saldo, distinto do anterior).
 - A referência precisa ser do mesmo provider, player, wallet, moeda e rodada, e de mesmo valor. Interpretações na seção 5.
 - Um teste falha se `parseFloat`, `Number(` ou `Math.round(` aparecerem no domínio (`test/unit/domain/no-number-for-money.test.ts`).
+- O PostgreSQL aceita `NaN` em `numeric` e o trata como maior que qualquer número, então `>= 0` não o barra. Toda coluna monetária tem `CHECK (coluna <> 'NaN')` (migration `monetary_not_nan`).
 
 ### Concorrência entre instâncias
 - A unidade de concorrência é a wallet; não há lock global nem estado em memória.
@@ -84,7 +85,8 @@ Camadas: `domain` (regras puras, só `decimal.js`) ← `application` (casos de u
 - Consumer dentro do processo da API (`SQS_CONSUMER_ENABLED`), mesmo caso de uso do HTTP. Wallets em paralelo, cada wallet em ordem (`MessageGroupId = walletId`).
 - Duas camadas: a inbox `(consumer_name, message_id)` pega a mesma mensagem; a chave de idempotência pega a mesma operação vinda de outra mensagem ou do HTTP.
 - Negócio: ack. Contenção: até 3 tentativas no processo. Banco fora ou wallet ainda inexistente: `ChangeMessageVisibility` com backoff exponencial e jitter; a redrive policy (`maxReceiveCount` 10) leva à DLQ. Permanente (JSON, schema, contrato, conflitos, erro inesperado): DLQ na hora, com `reason` nos atributos.
-- `SIGTERM`: para de receber, espera o long poll (até 10 s), termina o que está em andamento e devolve o resto.
+- `SIGTERM`: para de receber, espera o long poll (até 10 s), termina o que está em andamento e devolve o resto. Se o prazo vence, as não iniciadas voltam na hora; a que segue rodando ainda faz ack se commitar, e a inbox impede efeito duplo se ela for reentregue.
+- Toda chamada SQS tem prazo (conexão 3 s, requisição 5 s; o receive tem o long poll mais 5 s): um endpoint que aceita a conexão e não responde não trava o consumer. Falhas de rota ou DNS do banco (`ENETUNREACH`, `EHOSTDOWN`, `ENOTFOUND`) são transitórias; um host errado de verdade chega à DLQ pela redrive.
 - Eventos gravados na outbox na mesma transação (`WagerTransactionProcessed`, `WagerTransactionRejected`, `WalletBalanceChanged` só quando o saldo muda, `WagerTransactionPendingReference`), envelope com `eventType` e `version` por subclasse.
 - Publisher em toda instância (`OUTBOX_PUBLISHER_ENABLED`): lease de 30 s com dono (`lease_token`), envio para `wagering-events.fifo` com `MessageGroupId` = wallet e `MessageDeduplicationId` = `eventId`, retry com backoff e jitter; a falha de um evento segura só a sua wallet. Reenvio depois de lease vencido é contado e descartado pela deduplicação.
 - Worker de `PENDING_REFERENCE` em toda instância: confere na hora e depois de 1, 2, 4 s... até 60 s, com jitter; na 15ª conferência com a referência inexistente, `REJECTED` com `REFERENCE_NOT_FOUND` e `WagerTransactionRejected`. Uma linha que falha, também no COMMIT, é pulada no lote e não trava as outras.
