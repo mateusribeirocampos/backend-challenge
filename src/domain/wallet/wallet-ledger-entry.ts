@@ -41,7 +41,11 @@ export class WalletLedgerEntry {
   readonly balanceBefore: Money;
   readonly balanceAfter: Money;
   readonly walletVersion: number;
-  readonly createdAt: Date;
+  /**
+   * Epoch milliseconds, not a Date: Object.freeze does not stop date.setTime(), so a
+   * stored Date could still be changed by whoever holds a reference to it.
+   */
+  private readonly createdAtEpochMs: number;
 
   private constructor(state: LedgerEntryState) {
     this.id = state.id;
@@ -52,8 +56,13 @@ export class WalletLedgerEntry {
     this.balanceBefore = state.balanceBefore;
     this.balanceAfter = state.balanceAfter;
     this.walletVersion = state.walletVersion;
-    this.createdAt = state.createdAt;
+    this.createdAtEpochMs = state.createdAt.getTime();
     Object.freeze(this);
+  }
+
+  /** A new Date on every read: changing it does not change the entry. */
+  get createdAt(): Date {
+    return new Date(this.createdAtEpochMs);
   }
 
   /** Validates the entry's arithmetic: balanceBefore +/- money must equal balanceAfter. */

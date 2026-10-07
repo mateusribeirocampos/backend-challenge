@@ -189,3 +189,35 @@ describe('Wallet.rehydrate', () => {
     expect(wallet.updatedAt).toEqual(LATER);
   });
 });
+
+describe('Wallet dates cannot be changed through a Date reference', () => {
+  const instant = '2026-10-06T12:00:00.000Z';
+
+  test('mutating the Date given to open() or read back does not move createdAt/updatedAt', () => {
+    const at = new Date(instant);
+    const { wallet } = Wallet.open({
+      id: WALLET_ID,
+      playerId: PLAYER_ID,
+      initialBalance: brl('0.00'),
+      at,
+      openingTransactionId: 'tx-opening',
+      openingLedgerEntryId: 'entry-opening',
+    });
+
+    at.setTime(0);
+    wallet.createdAt.setTime(0);
+    wallet.updatedAt.setTime(0);
+
+    expect([wallet.createdAt.toISOString(), wallet.updatedAt.toISOString()]).toEqual([instant, instant]);
+  });
+
+  test('mutating the Date given to a movement does not move updatedAt', () => {
+    const wallet = walletWith(brl('100.00'));
+    const at = new Date(instant);
+    wallet.debit({ ledgerEntryId: 'entry-2', transactionId: 'tx-2', money: brl('25.00'), at });
+
+    at.setTime(0);
+
+    expect(wallet.updatedAt.toISOString()).toBe(instant);
+  });
+});
