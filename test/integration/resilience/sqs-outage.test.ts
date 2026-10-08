@@ -44,7 +44,10 @@ describe('SQS goes down in the middle of the processing (extra: infrastructure f
     // The publisher works over the whole test database: leave it only this test's events.
     await markEveryPendingEventPublished(orm);
 
-    const base = consumerConfig(queues, { retryBaseDelaySeconds: 1, retryMaxDelaySeconds: 1 });
+    // A ReceiveMessage that reaches SQS while its answer is lost in the outage hides the message
+    // for the visibility timeout before it comes back (at-least-once). 5 s instead of 30 s keeps
+    // that path inside the test's wait on any machine.
+    const base = consumerConfig(queues, { retryBaseDelaySeconds: 1, retryMaxDelaySeconds: 1, visibilityTimeoutSeconds: 5 });
     const endpoint = new URL(base.sqs.endpoint ?? 'http://localhost:4566');
     proxy = TcpProxy.start(endpoint.hostname, Number(endpoint.port));
     app = await startTestApp({
