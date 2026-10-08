@@ -2,7 +2,7 @@
 
 Processador de transações de apostas (BET, WIN, LOSS, REFUND, ROLLBACK) que recebe operações por HTTP e por SQS, mantém o saldo de cada wallet e um ledger auditável, e publica eventos. Como executar e onde cada requisito é verificado: [README.md](README.md).
 
-Em três frases: toda operação roda numa única transação SQL que grava primeiro (idempotência por chave única), trava só a linha da wallet (`FOR NO KEY UPDATE`), aplica a regra numa função pura do domínio e grava saldo, ledger, resultado e eventos (outbox) juntos. O PostgreSQL confere no commit que o saldo é igual ao fim do ledger. A fila entrega pelo menos uma vez; a inbox e a chave de idempotência garantem um efeito só.
+Em três frases: toda operação roda numa única transação SQL que grava primeiro (idempotência por chave única), trava só a linha da wallet (`FOR NO KEY UPDATE`), aplica a regra numa função de domínio sem I/O e grava saldo, ledger, resultado e eventos (outbox) juntos. O PostgreSQL confere no commit que o saldo é igual ao fim do ledger. A fila entrega pelo menos uma vez; a inbox e a chave de idempotência garantem um efeito só.
 
 ## 1. Decisões
 
@@ -11,7 +11,7 @@ Em três frases: toda operação roda numa única transação SQL que grava prim
 | `Money` sobre `decimal.js`, entrada só por string validada | dinheiro nunca passa por `number`; `"1e3"` e `"Infinity"` recusados antes do `Decimal` | `bigint` em centavos: parsing manual e serializador próprio | `src/domain/money/money.ts` |
 | Código de moeda: formato + tabela ISO 4217 do runtime; `XXX` e `XTS` recusados | `ABC` passava só com regex | lista própria de moedas (manutenção) | `money.ts` |
 | Moedas operadas em configuração (`SUPPORTED_CURRENCIES`, padrão `BRL`) | quais moedas a plataforma opera é negócio, não propriedade do valor | validar só ISO: aceitaria `XAU`, `HRK` | `src/application/wallets/open-wallet.ts` |
-| Regras de negócio numa função pura | testável sem banco; a aplicação busca, trava e grava | regras espalhadas no caso de uso | `src/domain/wager/apply-wager-transaction.ts` |
+| Regras de negócio numa função de domínio sem I/O | testável sem banco; a aplicação busca, trava e grava | regras espalhadas no caso de uso | `src/domain/wager/apply-wager-transaction.ts` |
 | Lock pessimista por wallet com `FOR NO KEY UPDATE` | a FK do insert pega `KEY SHARE` na wallet; `FOR UPDATE` causava deadlock entre duas apostas | otimista com retry: tempestade de retries numa wallet disputada | `src/infrastructure/persistence/repositories/mikro-orm-wallet.repository.ts` |
 | `READ COMMITTED` + `lock_timeout` de 2 s | depois do lock, lê o saldo commitado; sem limite, requisições acumulam e esgotam o pool | `SERIALIZABLE`: troca espera por erros `40001` | `mikro-orm-transaction-runner.ts` |
 | Espera por conexão no pool limitada a 2 s (`DATABASE_POOL_ACQUIRE_TIMEOUT_MS`), erro transitório | numa rodada de carga anterior a esse prazo, a espera pelo pool chegou a 2.185 ms sem virar `503`; com prazo, a sobrecarga vira `503` + `Retry-After` | sem prazo (latência sem limite) | `mikro-orm.config.ts`, `connection-pools.test.ts` |
@@ -31,7 +31,7 @@ Em três frases: toda operação roda numa única transação SQL que grava prim
 | Retry no processo só para contenção (`55P03`, `40P01`, `40001`) | resolve em milissegundos; sem ele, uma wallet disputada mandava mensagens não tentadas para a DLQ | retry no processo para todo transitório | `src/application/retry-on-contention.ts` |
 | No `SIGTERM`, esperar o long poll em vez de abortar | abortar no cliente não cancela o poll no servidor; a mensagem ficaria escondida | abortar a requisição | `src/interfaces/messaging/sqs-wager-consumer.ts` |
 | MikroORM 7 com `defineEntity` fora do domínio; escritas imediatas na ordem das FKs | fronteira transacional explícita; domínio sem ORM; ordem visível no caso de uso | decorators nas entidades; `flush` da Unit of Work | `src/infrastructure/persistence` |
-| Conexão perdida no meio da transação volta ao pool (`release-dead-connections.ts`) | o kysely 0.29 só devolve a conexão se o `ROLLBACK` der certo; com o banco fora ele falha e o pool esgotava para sempre (503 até reiniciar) | reiniciar o processo depois de uma queda | `test/integration/resilience/database-outage.test.ts` |
+| Conexão perdida no meio da transação volta ao pool (`release-dead-connections.ts`) | o kysely 0.29 só devolve a conexão se o `BEGIN` e o `ROLLBACK` derem certo; com o banco fora eles falham e o pool esgotava para sempre (503 até reiniciar) | reiniciar o processo depois de uma queda | `test/integration/resilience/database-outage.test.ts` |
 | Migrations escritas à mão, com `up` e `down` e teste de reversibilidade | CHECK, índice parcial e trigger não cabem no mapeamento | geração por diff | `test/integration/support/migration-reversibility.ts` |
 | MiniStack no lugar do LocalStack | a imagem do LocalStack exige token pago; o enunciado aceita os dois | LocalStack | `docker-compose.yml` |
 | Erro inesperado registrado só por classe, SQLSTATE e constraint | a mensagem do driver carrega o SQL com parâmetros (valores) | truncar a mensagem (o valor continua lá) | `src/application/error-summary.ts` |
@@ -48,21 +48,21 @@ HTTP POST /wagering/transactions        SQS wager-transactions.fifo
            1. INSERT wager_transaction ON CONFLICT DO NOTHING   -> replay | conflito
            2. SELECT wallet FOR NO KEY UPDATE (lock_timeout 2 s)
            3. lê a referência e se ela já foi revertida
-           4. applyWagerTransaction (domínio puro)
+           4. applyWagerTransaction (domínio, sem I/O)
            5. grava saldo, ledger, resultado e eventos (outbox)
            6. COMMIT  (o banco confere saldo == fim do ledger)
         /                                  \
   201 / 200 / 202 / 422                    ack (DeleteMessage) só depois do COMMIT
 ```
 
-Camadas: `domain` (regras puras, só `decimal.js`) ← `application` (casos de uso e portas) ← `infrastructure` (MikroORM, SQS, config) e `interfaces` (HTTP, consumer SQS e os loops do publisher e do worker). A ligação entre portas e adaptadores fica em `src/wagering.module.ts`, `src/wager-consumer.module.ts` e `src/background-workers.module.ts`.
+Camadas: `domain` (regras sem I/O, só `decimal.js`) ← `application` (casos de uso e portas) ← `infrastructure` (MikroORM, SQS, config) e `interfaces` (HTTP, consumer SQS e os loops do publisher e do worker). A ligação entre portas e adaptadores fica em `src/wagering.module.ts`, `src/wager-consumer.module.ts` e `src/background-workers.module.ts`.
 
 ## 3. Os pontos avaliados
 
 ### Correção financeira
 - `Money` imutável, escala fixa de duas casas, sem arredondamento: mais de duas casas é recusado. Moedas diferentes lançam erro. Até 18 dígitos inteiros, o limite da coluna `numeric(20,2)`, que volta do driver como string.
 - `BET` debita (`INSUFFICIENT_FUNDS`); `WIN` e `REFUND` creditam; `LOSS` não move saldo; `ROLLBACK` inverte a referência (`REVERSAL_WOULD_OVERDRAW` quando faltaria saldo, distinto do anterior).
-- A referência precisa ser do mesmo provider, player, wallet, moeda e rodada, e de mesmo valor. Interpretações na seção 5.
+- A referência precisa ser do mesmo provider, player, wallet, moeda e rodada; REFUND e ROLLBACK também exigem o mesmo valor da referência (um WIN pode pagar outro valor). Interpretações na seção 5.
 - Estados: `PENDING` vai para `PROCESSED`, `REJECTED` ou `PENDING_REFERENCE`; `PENDING_REFERENCE` vai para `PROCESSED` ou `REJECTED`; os terminais não mudam mais (`FAILED` existe no modelo, mas não é gravado, ver seção 7). A tabela está em `ALLOWED_TRANSITIONS` (`wager-transaction-status.ts`) e de novo no trigger `wager_transactions_guard`, que recusa qualquer outra transição.
 - Um teste falha se `parseFloat`, `Number(` ou `Math.round(` aparecerem no domínio (`test/unit/domain/no-number-for-money.test.ts`).
 - O PostgreSQL aceita `NaN` em `numeric` e o trata como maior que qualquer número, então `>= 0` não o barra. Toda coluna monetária tem `CHECK (coluna <> 'NaN')` (migration `monetary_not_nan`).
@@ -95,13 +95,13 @@ Camadas: `domain` (regras puras, só `decimal.js`) ← `application` (casos de u
 - `SIGTERM`: para de receber, espera o long poll (até 10 s), termina o que está em andamento e devolve o resto. Se o prazo vence, as não iniciadas voltam na hora; a que segue rodando ainda faz ack se commitar, e a inbox impede efeito duplo se ela for reentregue.
 - Toda chamada SQS tem prazo (conexão 3 s, requisição 5 s; o receive tem o long poll mais 5 s): um endpoint que aceita a conexão e não responde não trava o consumer. Falhas de rota ou DNS do banco (`ENETUNREACH`, `EHOSTDOWN`, `ENOTFOUND`) são transitórias; um host errado de verdade chega à DLQ pela redrive.
 - Eventos gravados na outbox na mesma transação (`WagerTransactionProcessed`, `WagerTransactionRejected`, `WalletBalanceChanged` só quando o saldo muda, `WagerTransactionPendingReference`), envelope com `eventType` e `version` por subclasse.
-- Publisher em toda instância (`OUTBOX_PUBLISHER_ENABLED`): lease de 30 s com dono (`lease_token`), envio para `wagering-events.fifo` com `MessageGroupId` = wallet e `MessageDeduplicationId` = `eventId`, retry com backoff e jitter; a falha de um evento segura só a sua wallet. Reenvio depois de lease vencido é contado e descartado pela deduplicação.
+- Publisher em toda instância (`OUTBOX_PUBLISHER_ENABLED`): lease de 30 s com dono (`lease_token`), envio para `wagering-events.fifo` com `MessageGroupId` = wallet e `MessageDeduplicationId` = `eventId`, retry com backoff e jitter; a falha de um evento segura só a sua wallet. A entrega é at-least-once: um reenvio (por exemplo depois de lease vencido) usa o mesmo `eventId`; a deduplicação da FIFO ajuda, e o consumidor final deduplica por `eventId`.
 - Worker de `PENDING_REFERENCE` em toda instância: confere na hora e depois de 1, 2, 4 s... até 60 s, com jitter; na 15ª conferência com a referência inexistente, `REJECTED` com `REFERENCE_NOT_FOUND` e `WagerTransactionRejected`. Uma linha que falha, também no COMMIT, é pulada no lote e não trava as outras; nenhuma linha é conferida duas vezes no mesmo lote.
 - Prova: `test/integration/messaging`, com filas próprias por teste, processo filho morto com `SIGKILL` entre o commit e o ack e entre o claim e o envio, e `SIGTERM` no `src/main.ts` real.
 - Queda no meio do trabalho, sem reiniciar o processo (`test/integration/resilience`, com um proxy TCP entre a aplicação e o serviço): com o PostgreSQL fora, as transações interrompidas voltam 503, nada fica gravado e o reenvio com a mesma chave tem um efeito só, e consumer, publisher e worker terminam o que esperava quando ele volta, sem nada na DLQ; com o SQS fora, o HTTP segue respondendo 201, e na volta o publisher envia o acumulado e o consumer processa o que esperava, uma vez cada.
 
 ### Observabilidade
-- Logs JSON, uma linha por evento, com `correlationId`, `messageId`, `transactionId`, `walletId` e `providerId` onde existem (HTTP, consumer, publisher, worker). Nenhum valor monetário nem payload.
+- Logs JSON, uma linha por evento, com `correlationId`, `messageId`, `transactionId`, `walletId` e `providerId` onde existem (HTTP, consumer, publisher, worker), sem payload e sem valores das operações. A única exceção é a reconciliação: ao achar uma divergência, registra moeda, diferença e quantidade de lançamentos.
 - Erro inesperado vira classe, código (SQLSTATE) e constraint, nos logs, no `500` e no atributo `detail` da DLQ. A mensagem do driver traz o SQL com os parâmetros e a linha recusada, valores incluídos (`src/application/error-summary.ts`).
 - `GET /metrics` (aberto, como o health) no formato texto do Prometheus, gerado à mão a partir dos contadores em memória: transações por status (`wager_http_transactions_total`, `wager_messages_processed_total`), duplicatas por camada e origem, retries, DLQ, conflitos de lock, `wager_outbox_lag_seconds` e os histogramas `wager_processing_duration_seconds{source}`, com buckets de 5 ms a 5 s (uma transação leva milissegundos; quem esperou o `lock_timeout` de 2 s cai entre 1 e 2,5 s) e `wager_wallet_lock_wait_seconds`. `wager_lock_conflicts_total` conta só o lock perdido (`55P03`, `40P01`, `40001`); a espera que termina bem, como a segunda aposta de 80 na fila da primeira, aparece no histograma de espera.
 - Prova: `test/integration/observability` (métricas depois de operações HTTP; erro real do PostgreSQL com um valor marcador que não aparece em log, corpo nem DLQ).
@@ -173,9 +173,14 @@ Autenticação: `ProviderAuthGuard` chama a porta `ProviderIdentityPort`, hoje u
 
 - Se o SQS recusasse para sempre um evento, a wallet dele pararia de publicar (as outras seguem). Isso aparece nos logs `outbox.publish_failed` e `outbox.wallet_stalled` (a partir de 10 tentativas) e em `wager_outbox_lag_seconds`.
 - No teste de carga a publicação da outbox não acompanha a escrita saturada: com 64 clientes em wallets distintas são gravados cerca de 2.000 eventos/s e publicados 348,3/s (mediana das 3 rodadas). Com o pool próprio, a publicação na hot wallet com 64 clientes subiu de 4,3 para 139,3 eventos/s. Próximos passos: `SendMessageBatch` e marcação em lote.
+- Se a resposta de um `ReceiveMessage` se perde numa queda do SQS, a mensagem só volta depois do visibility timeout (30 s). Nada se perde nem duplica, mas o processamento atrasa esse tempo.
 - Os eventos gerados pelo worker de `PENDING_REFERENCE` usam o id da transação como `correlationId`: o da requisição original não é gravado.
 - Nenhuma transação é gravada como `FAILED`: gravar exigiria uma segunda transação depois do rollback e congelaria a chave num possível bug. A DLQ, com o motivo, é o registro auditável.
+- Sem autenticação, um provedor pode se apresentar com o `providerId` de outro e usar as chaves e operações dele. O desenho com Keycloak está na seção 6.
 - O reprocessamento da DLQ é manual (README). `wager_messages_dead_lettered_total` conta só o que o consumer envia; o que a redrive policy move aparece na profundidade da DLQ no SQS.
 - As métricas são por instância e voltam a zero no restart: o Prometheus soma as instâncias e trata o reinício do contador.
-- A tabela ISO 4217 vem dos dados ICU do runtime e pode mudar com a versão (a CI fixa o Bun). Em produção seria um catálogo próprio.
+- A tabela ISO 4217 vem dos dados ICU do runtime e pode mudar com a versão (a CI e a imagem Docker fixam o Bun 1.4.2). Em produção seria um catálogo próprio.
+- O readiness responde `503` em até 2 s, mas não cancela o `select 1` em andamento: com um banco que aceita a conexão e não responde, essas consultas seguram conexões do pool até o socket cair. A correção seria uma conexão dedicada ao health, encerrada no timeout.
+- No instrumento de carga (`load/`), uma resposta HTTP sem JSON seria contada duas vezes (status e erro de rede), e o `stop()` dos amostradores pode perder uma coleta ainda em andamento. Nas rodadas publicadas não houve resposta sem JSON, e as verificações de saldo, ledger e filas não dependem desses contadores.
+- A devolução de conexões mortas ao pool (`release-dead-connections.ts`) altera o driver do kysely 0.29. Ao atualizar o kysely, o teste de queda do PostgreSQL mostra se a correção ainda é necessária.
 - Reverter uma migration não recupera dados. A configuração local usa credenciais fictícias do emulador.

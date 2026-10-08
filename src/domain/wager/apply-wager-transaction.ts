@@ -50,7 +50,7 @@ export type WagerOutcome =
   | { readonly status: typeof WagerTransactionStatus.PendingReference };
 
 /**
- * The business rules of spec section 7 in one pure function. It decides the outcome
+ * The business rules of spec section 7 in one function without I/O. It decides the outcome
  * and applies it to the objects in memory: the transaction changes status, and the
  * wallet changes balance only when the outcome is PROCESSED with a ledger entry.
  * Nothing is saved here. The use case runs this inside one SQL transaction, with the

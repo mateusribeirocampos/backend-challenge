@@ -34,7 +34,7 @@ export interface ApplyOptions {
  *
  *   1. lock the wallet row: SELECT ... FOR NO KEY UPDATE (lock_timeout 2s);
  *   2. resolve the reference and whether it was already reversed;
- *   3. applyWagerTransaction (pure domain rules);
+ *   3. applyWagerTransaction (domain rules, no I/O);
  *   4. write wallet, transaction outcome, ledger entry and outbox events.
  *
  * Having one copy of this path is what guarantees that a REFUND resolved by the worker
