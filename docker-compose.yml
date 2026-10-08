@@ -1,8 +1,9 @@
 # Local environment only. Credentials below are dummy values for containers on this machine.
 #
-# docker compose up -d                                     -> postgres + SQS emulator (dev and tests)
-# docker compose --profile app up -d --build --scale app=3 -> also runs 3 app instances,
-#                                                             each with the SQS consumer on
+# docker compose up -d                                            -> postgres + SQS emulator (dev and tests)
+# docker compose --profile app up -d --build --scale app=3 --wait -> also runs 3 app instances,
+#                                                                    each with the SQS consumer on
+# docker compose --profile app down                               -> stops all of it (the volume stays)
 #
 # The app instances live behind the "app" profile so `docker compose up -d` starts only
 # the infrastructure the tests need. The tests create their own queues, so a running

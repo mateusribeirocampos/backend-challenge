@@ -52,9 +52,10 @@ curl -i -X POST localhost:3000/wagering/transactions -H 'content-type: applicati
 Para ver a aplicação com três instâncias:
 
 ```bash
-docker compose --profile app up -d --build --scale app=3
-docker compose ps app                      # as três ficam healthy
+docker compose --profile app up -d --build --scale app=3 --wait   # volta quando as três estão healthy
+docker compose ps app
 docker compose port --index 2 app 3000     # porta do host da instância 2
+docker compose --profile app down          # para tudo, inclusive as instâncias; sem -v o banco fica
 ```
 
 O serviço `migrate` roda as migrations uma vez antes das instâncias subirem. Cada instância roda também o consumer da fila `wager-transactions.fifo`. Os testes criam filas próprias, então as instâncias podem ficar de pé enquanto `bun test` roda.
