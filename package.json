@@ -10,6 +10,7 @@
     "test": "bun test",
     "test:unit": "bun test test/unit",
     "test:integration": "bun test test/integration",
+    "test:load": "bun load/run.ts",
     "migration:create": "bun scripts/migrate.ts create",
     "migration:up": "bun scripts/migrate.ts up",
     "migration:down": "bun scripts/migrate.ts down",
