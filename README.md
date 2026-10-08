@@ -142,6 +142,7 @@ Um REFUND enviado antes da sua BET responde `202` com `PENDING_REFERENCE`. O wor
 | `bun run test:unit` | só os unitários, sem containers |
 | `bun run test:integration` | só os de integração, precisam do `docker compose up -d` |
 | `bun run test:load` | teste de carga com 3 instâncias reais, PostgreSQL e MiniStack (cerca de 3 min, fora do `bun test` e da CI); reescreve [docs/teste-de-carga.md](docs/teste-de-carga.md) e grava os dados brutos em `load-results/` |
+| `bun run test:load:summary` | junta as 3 rodadas mais recentes de `load-results/` (ou os `result.json` passados como argumento): reescreve [docs/teste-de-carga.md](docs/teste-de-carga.md) com o relatório da rodada mediana e uma tabela de repetibilidade (mediana e variação de cada métrica); não gera carga |
 | `bun run migration:create <nome>` | cria uma migration vazia com `up()` e `down()` |
 | `bun run migration:up` | aplica as migrations pendentes |
 | `bun run migration:down` | reverte só a última migration aplicada |
