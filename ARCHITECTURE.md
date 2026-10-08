@@ -69,7 +69,7 @@ Camadas: `domain` (regras puras, só `decimal.js`) ← `application` (casos de u
 - A unidade de concorrência é a wallet; não há lock global nem estado em memória.
 - Cenário do enunciado (saldo 100, duas apostas de 80 em paralelo): uma processada, outra `INSUFFICIENT_FUNDS`, saldo 20,00, um débito.
 - Prova: `test/integration/wagering/concurrency.test.ts` (HTTP real, `Promise.all`) e `test/integration/schema/wallet-lock-order.schema.test.ts` (duas conexões; com `FOR UPDATE` dá deadlock, com `FOR NO KEY UPDATE` não). Trocar o lock ou removê-lo faz os testes falharem.
-- Teste de carga com 3 instâncias nesta máquina ([docs/teste-de-carga.md](docs/teste-de-carga.md)): wallets distintas chegam a 984,5 aceitas/s com 64 clientes; a hot wallet chega a 280,5/s com 8 clientes e cai para 163,2/s com 64 (p99 de 1.264,6 ms), sem nenhum 503, e as 35 verificações de correção passam.
+- Teste de carga com 3 instâncias nesta máquina, 3 rodadas, mediana ([docs/teste-de-carga.md](docs/teste-de-carga.md)): wallets distintas chegam a 1.020,5 aceitas/s com 64 clientes (p99 de 137,1 ms); a hot wallet chega a 307,8/s com 8 clientes e cai para 182,0/s com 64 (p99 de 1.162,4 ms), sem nenhum 503, e as 35 verificações de correção passam nas 3 rodadas.
 - Três processos reais de `src/main.ts` (HTTP, consumer, publisher e worker em cada um) sobre o mesmo banco e as mesmas filas: `test/integration/multi-instance`. Uma instância morre com `SIGKILL` segurando uma mensagem e uma requisição; o provedor reenvia com a mesma chave, a mensagem volta depois do visibility timeout, e no fim cada wallet bate com o ledger.
 
 ### Idempotência persistente
@@ -156,7 +156,7 @@ Autenticação: `ProviderAuthGuard` chama a porta `ProviderIdentityPort`, hoje u
 ## 7. Limitações
 
 - Se o SQS recusasse para sempre um evento, a wallet dele pararia de publicar (as outras seguem). Isso aparece nos logs `outbox.publish_failed` e `outbox.wallet_stalled` (a partir de 10 tentativas) e em `wager_outbox_lag_seconds`.
-- No teste de carga a publicação da outbox (243,5 eventos/s) não acompanha a escrita saturada (1.970,0/s). Próximos passos: `SendMessageBatch` e marcação em lote. O relatório é anterior ao pool próprio dos loops e ao prazo do pool, e precisa ser gerado de novo.
+- No teste de carga a publicação da outbox não acompanha a escrita saturada: com 64 clientes em wallets distintas são gravados cerca de 2.000 eventos/s e publicados 348,3/s (mediana). Com o pool próprio, a publicação na hot wallet com 64 clientes subiu de 4,3 para 139,3 eventos/s. Próximos passos: `SendMessageBatch` e marcação em lote.
 - Os eventos gerados pelo worker de `PENDING_REFERENCE` usam o id da transação como `correlationId`: o da requisição original não é gravado.
 - Nenhuma transação é gravada como `FAILED`: gravar exigiria uma segunda transação depois do rollback e congelaria a chave num possível bug. A DLQ, com o motivo, é o registro auditável.
 - O reprocessamento da DLQ é manual (README). `wager_messages_dead_lettered_total` conta só o que o consumer envia; o que a redrive policy move aparece na profundidade da DLQ no SQS.
