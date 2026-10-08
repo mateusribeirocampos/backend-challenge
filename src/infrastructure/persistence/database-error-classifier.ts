@@ -42,10 +42,16 @@ const TRANSIENT_NETWORK_CODES = new Set([
 /**
  * pg raises these without a code. 'Connection terminated': the connection dropped in the
  * middle of a query, or (with "due to connection timeout") a new one did not open in time.
- * 'timeout exceeded when trying to connect': no free connection in the pool within
- * DATABASE_POOL_ACQUIRE_TIMEOUT_MS (overload). Both can pass on their own, so: transient.
+ * 'is not queryable': the next statement (ROLLBACK included) on a client whose connection
+ * already died. 'timeout exceeded when trying to connect': no free connection in the pool
+ * within DATABASE_POOL_ACQUIRE_TIMEOUT_MS (overload). All can pass on their own: transient.
  */
-const CONNECTION_LOST_MESSAGES = ['Connection terminated', 'connection timeout', 'timeout exceeded when trying to connect'];
+const CONNECTION_LOST_MESSAGES = [
+  'Connection terminated',
+  'connection timeout',
+  'is not queryable',
+  'timeout exceeded when trying to connect',
+];
 
 /**
  * Contention, not unavailability: the database answered, another transaction held the
