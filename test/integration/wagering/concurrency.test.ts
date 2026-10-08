@@ -103,7 +103,7 @@ describe('concurrency over HTTP (spec 13)', () => {
     await expectBalanceMatchesLedger(orm, app.baseUrl, wallet.id, '10.00');
   });
 
-  test('2c. REFUND and ROLLBACK of the same BET in parallel: exactly one reversal, never 125 (ADR-008)', async () => {
+  test('2c. REFUND and ROLLBACK of the same BET in parallel: exactly one reversal, never 125', async () => {
     const wallet = await openWallet(app.baseUrl, '100.00');
     const bet = wager(wallet, { money: { amount: '25.00', currency: 'BRL' } });
     expect((await submit(app.baseUrl, bet)).status).toBe(201);

@@ -1,6 +1,6 @@
 # Teste de carga
 
-> Gerado por `bun run test:load` em 2026-10-08T12:00:03.891Z. Não editar à mão: uma nova execução reescreve este arquivo. Os números valem para a máquina descrita em "Ambiente". Os dados brutos ficam em `load-results/` (fora do git).
+> Gerado por `bun run test:load:summary` a partir de 3 execuções de `bun run test:load` (a última terminou em 2026-10-08T12:11:20.667Z); o detalhe abaixo é o da rodada 1. Não editar à mão: uma nova execução reescreve este arquivo. Os números valem para a máquina descrita em "Ambiente". Os dados brutos ficam em `load-results/` (fora do git).
 
 ## Resumo
 

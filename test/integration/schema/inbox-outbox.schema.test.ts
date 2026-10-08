@@ -79,7 +79,7 @@ describe('outbox_messages', () => {
   });
 });
 
-describe('outbox_messages: publication order and lease (Slice 4)', () => {
+describe('outbox_messages: publication order and lease', () => {
   test('sequence_number follows the insert order, also inside one statement', async () => {
     const first = outboxRow();
     const second = outboxRow();

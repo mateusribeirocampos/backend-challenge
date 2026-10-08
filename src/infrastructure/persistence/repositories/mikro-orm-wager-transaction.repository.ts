@@ -21,7 +21,7 @@ export class MikroOrmWagerTransactionRepository implements WagerTransactionRepos
 
   async insertIfAbsent(transaction: WagerTransaction): Promise<boolean> {
     const record = toWagerTransactionRecord(transaction);
-    // Insert-first (ADR-003), in one statement:
+    // Insert-first, in one statement:
     //   - ON CONFLICT DO NOTHING (no target) covers both unique keys: (provider_id,
     //     idempotency_key) and (provider_id, external_transaction_id). If another transaction is inserting
     //     the same key right now, this statement waits for it to commit or roll back.

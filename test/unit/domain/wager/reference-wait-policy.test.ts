@@ -16,8 +16,8 @@ function secondsAfterAt(date: Date): number {
   return (date.getTime() - AT.getTime()) / 1000;
 }
 
-describe('reference wait policy (ADR-008 with 15 checks: base 1 s, factor 2, ceiling 60 s, jitter)', () => {
-  test('defaults: ADR-008 delays, 15 checks', () => {
+describe('reference wait policy (15 checks: base 1 s, factor 2, ceiling 60 s, jitter)', () => {
+  test('defaults: 15 checks', () => {
     expect(DEFAULT_REFERENCE_WAIT_POLICY).toMatchObject({ maxAttempts: 15, baseDelayMs: 1_000, maxDelayMs: 60_000 });
   });
 

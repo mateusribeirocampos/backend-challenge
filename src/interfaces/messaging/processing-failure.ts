@@ -18,7 +18,7 @@ export const DeadLetterReason = {
   MalformedJson: 'MALFORMED_JSON',
   /** JSON, but not a valid envelope or data (same rules as the HTTP body). */
   SchemaInvalid: 'SCHEMA_INVALID',
-  /** Valid shape, refused by WagerTransaction.create (REFUND without reference, key namespace...). */
+  /** Valid shape, refused by WagerTransaction.create (REFUND without reference, BET with one...). */
   ContractViolation: 'CONTRACT_VIOLATION',
   /** The producer reused a messageId for different data. */
   MessageIdConflict: 'MESSAGE_ID_CONFLICT',

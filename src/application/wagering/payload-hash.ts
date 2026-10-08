@@ -4,7 +4,7 @@ import { Money, type MoneyProps } from '../../domain/money/money.js';
 /**
  * The business fields of a submitted transaction: what makes two submissions "the same
  * operation". The Idempotency-Key header, the SQS messageId, occurredAt and any other
- * transport metadata are NOT here (ADR-003).
+ * transport metadata are NOT here.
  */
 export interface WagerPayload {
   readonly providerId: string;

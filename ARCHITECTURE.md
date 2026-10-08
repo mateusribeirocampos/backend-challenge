@@ -14,7 +14,7 @@ Em três frases: toda operação roda numa única transação SQL que grava prim
 | Regras de negócio numa função pura | testável sem banco; a aplicação busca, trava e grava | regras espalhadas no caso de uso | `src/domain/wager/apply-wager-transaction.ts` |
 | Lock pessimista por wallet com `FOR NO KEY UPDATE` | a FK do insert pega `KEY SHARE` na wallet; `FOR UPDATE` causava deadlock entre duas apostas | otimista com retry: tempestade de retries numa wallet disputada | `src/infrastructure/persistence/repositories/mikro-orm-wallet.repository.ts` |
 | `READ COMMITTED` + `lock_timeout` de 2 s | depois do lock, lê o saldo commitado; sem limite, requisições acumulam e esgotam o pool | `SERIALIZABLE`: troca espera por erros `40001` | `mikro-orm-transaction-runner.ts` |
-| Espera por conexão no pool limitada a 2 s (`DATABASE_POOL_ACQUIRE_TIMEOUT_MS`), erro transitório | no teste de carga a fila do pool chegou a 2.185 ms sem virar `503`; com prazo, a sobrecarga vira `503` + `Retry-After` | sem prazo (latência sem limite) | `mikro-orm.config.ts`, `connection-pools.test.ts` |
+| Espera por conexão no pool limitada a 2 s (`DATABASE_POOL_ACQUIRE_TIMEOUT_MS`), erro transitório | numa rodada de carga anterior a esse prazo, a espera pelo pool chegou a 2.185 ms sem virar `503`; com prazo, a sobrecarga vira `503` + `Retry-After` | sem prazo (latência sem limite) | `mikro-orm.config.ts`, `connection-pools.test.ts` |
 | Publisher e worker com pool próprio (`DATABASE_BACKGROUND_POOL_SIZE`, 3) | na hot wallet as 10 conexões do pool ficavam no lock e a publicação caía para 4,3 eventos/s | pool único maior: só adia o problema | `src/background-workers.module.ts` |
 | Idempotência por insert-first com `ON CONFLICT DO NOTHING` | a segunda requisição idêntica espera no índice e lê o resultado final; não existe estado "em andamento" | consultar antes de gravar: corrida entre a consulta e o insert | `src/application/wagering/process-wager-transaction.ts` |
 | Resultado original gravado na transação | o replay devolve o saldo daquele momento | recalcular no replay | coluna `result_balance_amount` |
@@ -35,7 +35,7 @@ Em três frases: toda operação roda numa única transação SQL que grava prim
 | Migrations escritas à mão, com `up` e `down` e teste de reversibilidade | CHECK, índice parcial e trigger não cabem no mapeamento | geração por diff | `test/integration/support/migration-reversibility.ts` |
 | MiniStack no lugar do LocalStack | a imagem do LocalStack exige token pago; o enunciado aceita os dois | LocalStack | `docker-compose.yml` |
 | Erro inesperado registrado só por classe, SQLSTATE e constraint | a mensagem do driver carrega o SQL com parâmetros (valores) | truncar a mensagem (o valor continua lá) | `src/application/error-summary.ts` |
-| Teste de carga à parte (`bun run test:load`): 3 processos reais, banco e filas próprios, relatório escrito pelo próprio run | mede o lock por wallet e a outbox com números reais e confere saldo, ledger e filas depois da carga | k6: outra ferramenta e sem acesso ao banco para as verificações | `load/`, [docs/teste-de-carga.md](docs/teste-de-carga.md) |
+| Teste de carga à parte (`bun run test:load`): 3 processos reais, banco e filas próprios, relatório escrito pelo próprio run; `test:load:summary` junta três rodadas | mede o lock por wallet e a outbox com números reais e confere saldo, ledger e filas depois da carga | k6: outra ferramenta e sem acesso ao banco para as verificações | `load/`, [docs/teste-de-carga.md](docs/teste-de-carga.md) |
 | Autenticação como ponto de extensão (guard no-op) | não vale pontos; o tempo foi para o obrigatório | Keycloak (desenho na seção 6) | `src/interfaces/http/provider-auth.guard.ts` |
 
 ## 2. Fluxo de uma transação
@@ -71,7 +71,7 @@ Camadas: `domain` (regras puras, só `decimal.js`) ← `application` (casos de u
 - A unidade de concorrência é a wallet; não há lock global nem estado em memória.
 - Cenário do enunciado (saldo 100, duas apostas de 80 em paralelo): uma processada, outra `INSUFFICIENT_FUNDS`, saldo 20,00, um débito.
 - Prova: `test/integration/wagering/concurrency.test.ts` (HTTP real, `Promise.all`) e `test/integration/schema/wallet-lock-order.schema.test.ts` (duas conexões; com `FOR UPDATE` dá deadlock, com `FOR NO KEY UPDATE` não). Trocar o lock ou removê-lo faz os testes falharem.
-- Teste de carga com 3 instâncias nesta máquina, 3 rodadas, mediana ([docs/teste-de-carga.md](docs/teste-de-carga.md)): wallets distintas chegam a 1.020,5 aceitas/s com 64 clientes (p99 de 137,1 ms); a hot wallet chega a 307,8/s com 8 clientes e cai para 182,0/s com 64 (p99 de 1.162,4 ms), sem nenhum 503, e as 35 verificações de correção passam nas 3 rodadas.
+- Teste de carga com 3 instâncias nesta máquina, 3 rodadas, mediana de cada métrica (tabela de repetibilidade em [docs/teste-de-carga.md](docs/teste-de-carga.md); o detalhe do relatório é o da rodada 1): wallets distintas chegam a 1.020,5 aceitas/s com 64 clientes (p99 de 137,1 ms); a hot wallet chega a 307,8/s com 8 clientes e cai para 182,0/s com 64 (p99 de 1.162,4 ms), sem nenhum 503, e as 35 verificações de correção passam nas 3 rodadas.
 - Três processos reais de `src/main.ts` (HTTP, consumer, publisher e worker em cada um) sobre o mesmo banco e as mesmas filas: `test/integration/multi-instance`. Uma instância morre com `SIGKILL` segurando uma mensagem e uma requisição; o provedor reenvia com a mesma chave, a mensagem volta depois do visibility timeout, e no fim cada wallet bate com o ledger.
 
 ### Idempotência persistente
@@ -108,22 +108,22 @@ Camadas: `domain` (regras puras, só `decimal.js`) ← `application` (casos de u
 
 ## 4. Testes obrigatórios (seção 13)
 
-| Item | Status | Onde |
-|---|---|---|
-| Unidade: `Money`, wallet, regras, conflito de moeda, payload divergente | ✅ | `test/unit` |
-| Migrations e constraints | ✅ | `test/integration/migrations.test.ts`, `test/integration/schema` |
-| Atomicidade wallet, ledger, inbox e outbox | ✅ | `atomicity-and-outbox.test.ts`, `consumer-processing.test.ts` |
-| Inbox e redelivery; retry e DLQ | ✅ | `test/integration/messaging` |
-| Publishers concorrentes na mesma outbox | ✅ | `outbox-publisher.test.ts`, `outbox-publisher-crash.test.ts` |
-| Recuperação após reinicialização | ✅ | `multi-instance/restart.test.ts` (`SIGTERM` em todas, processos novos terminam outbox e referência pendente) |
-| 1. Mesma aposta 50 vezes em paralelo | ✅ | `concurrency.test.ts` |
-| 2. Disputa de saldo (2 × 80) | ✅ | `concurrency.test.ts`, `wallet-lock-order.schema.test.ts` |
-| 3. Wallets distintas em paralelo | ✅ | `concurrency.test.ts`, `consumer-message-groups.test.ts` |
-| 4. Três ou mais processos simultâneos | ✅ | `multi-instance/three-instances.test.ts` |
-| 5. Worker morto depois do commit e antes do ack | ✅ | `consumer-crash-before-ack.test.ts` |
-| 6. Dois publishers na mesma outbox | ✅ | `outbox-publisher.test.ts` |
-| 7. REFUND ou ROLLBACK antes da referência | ✅ | `pending-reference-worker.test.ts`, `consumer-reference-before-bet.test.ts` |
-| 8. Reinício com consistência final | ✅ | `multi-instance/restart.test.ts` (`SIGKILL` com trabalho em mãos, processo substituto) |
+| Item | Onde |
+|---|---|
+| Unidade: `Money`, wallet, regras, conflito de moeda, payload divergente | `test/unit` |
+| Migrations e constraints | `test/integration/migrations.test.ts`, `test/integration/schema` |
+| Atomicidade wallet, ledger, inbox e outbox | `atomicity-and-outbox.test.ts`, `consumer-processing.test.ts` |
+| Inbox e redelivery; retry e DLQ | `test/integration/messaging` |
+| Publishers concorrentes na mesma outbox | `outbox-publisher.test.ts`, `outbox-publisher-crash.test.ts` |
+| Recuperação após reinicialização | `multi-instance/restart.test.ts` (`SIGTERM` em todas, processos novos terminam outbox e referência pendente) |
+| 1. Mesma aposta 50 vezes em paralelo | `concurrency.test.ts` |
+| 2. Disputa de saldo (2 × 80) | `concurrency.test.ts`, `wallet-lock-order.schema.test.ts` |
+| 3. Wallets distintas em paralelo | `concurrency.test.ts`, `consumer-message-groups.test.ts` |
+| 4. Três ou mais processos simultâneos | `multi-instance/three-instances.test.ts` |
+| 5. Worker morto depois do commit e antes do ack | `consumer-crash-before-ack.test.ts` |
+| 6. Dois publishers na mesma outbox | `outbox-publisher.test.ts` |
+| 7. REFUND ou ROLLBACK antes da referência | `pending-reference-worker.test.ts`, `consumer-reference-before-bet.test.ts` |
+| 8. Reinício com consistência final | `multi-instance/restart.test.ts` (`SIGKILL` com trabalho em mãos, processo substituto) |
 
 ## 5. Interpretações do enunciado
 
@@ -172,7 +172,7 @@ Autenticação: `ProviderAuthGuard` chama a porta `ProviderIdentityPort`, hoje u
 ## 7. Limitações
 
 - Se o SQS recusasse para sempre um evento, a wallet dele pararia de publicar (as outras seguem). Isso aparece nos logs `outbox.publish_failed` e `outbox.wallet_stalled` (a partir de 10 tentativas) e em `wager_outbox_lag_seconds`.
-- No teste de carga a publicação da outbox não acompanha a escrita saturada: com 64 clientes em wallets distintas são gravados cerca de 2.000 eventos/s e publicados 348,3/s (mediana). Com o pool próprio, a publicação na hot wallet com 64 clientes subiu de 4,3 para 139,3 eventos/s. Próximos passos: `SendMessageBatch` e marcação em lote.
+- No teste de carga a publicação da outbox não acompanha a escrita saturada: com 64 clientes em wallets distintas são gravados cerca de 2.000 eventos/s e publicados 348,3/s (mediana das 3 rodadas). Com o pool próprio, a publicação na hot wallet com 64 clientes subiu de 4,3 para 139,3 eventos/s. Próximos passos: `SendMessageBatch` e marcação em lote.
 - Os eventos gerados pelo worker de `PENDING_REFERENCE` usam o id da transação como `correlationId`: o da requisição original não é gravado.
 - Nenhuma transação é gravada como `FAILED`: gravar exigiria uma segunda transação depois do rollback e congelaria a chave num possível bug. A DLQ, com o motivo, é o registro auditável.
 - O reprocessamento da DLQ é manual (README). `wager_messages_dead_lettered_total` conta só o que o consumer envia; o que a redrive policy move aparece na profundidade da DLQ no SQS.

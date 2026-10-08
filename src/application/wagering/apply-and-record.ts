@@ -19,7 +19,7 @@ export interface ApplyOptions {
   /** Goes into every event this run writes. */
   readonly correlationId: string;
   readonly causationId?: string | undefined;
-  /** PENDING_REFERENCE worker only: this is the last check, a reference still missing is final (ADR-008). */
+  /** PENDING_REFERENCE worker only: this is the last check, a reference still missing is final. */
   readonly lastReferenceCheck: boolean;
   /** Stored as reference_attempts: how many times the worker has checked (0 for a new submission). */
   readonly referenceAttempts: number;

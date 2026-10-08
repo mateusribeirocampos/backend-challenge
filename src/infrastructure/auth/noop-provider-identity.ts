@@ -5,7 +5,7 @@ import type {
 } from '../../application/ports/provider-identity.js';
 
 /**
- * NO-OP on purpose (ADR-006, phase 1): authentication is not implemented and every
+ * NO-OP on purpose: authentication is not implemented and every
  * caller is anonymous. This is the class to replace with a JWT validator (Keycloak or
  * Zitadel, client credentials per provider, JWKS); nothing else changes.
  */

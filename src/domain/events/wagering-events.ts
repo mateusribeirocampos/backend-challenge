@@ -106,7 +106,7 @@ export class WagerTransactionRejected extends IntegrationEvent<WagerTransactionR
   }
 }
 
-/** The referenced transaction is missing or not finished; this one waits (ADR-008). */
+/** The referenced transaction is missing or not finished; this one waits. */
 export class WagerTransactionPendingReference extends IntegrationEvent<WagerTransactionPendingReferenceData> {
   readonly eventType = 'WagerTransactionPendingReference';
   readonly version = 1;

@@ -20,7 +20,7 @@ export interface InboxMessageState extends ReceiveInboxProps {
 }
 
 /**
- * One message a consumer has handled (spec 6.5, ADR-005). The pair (consumerName,
+ * One message a consumer has handled (spec 6.5). The pair (consumerName,
  * messageId) is the primary key of inbox_messages: a redelivered message finds its
  * row and is not processed again. The row is written in the same SQL transaction as
  * the effect of the message, so "row exists" and "effect exists" are the same fact.

@@ -196,7 +196,7 @@ describe('Money is immutable', () => {
   });
 });
 
-describe('Money rounding policy (ADR-004)', () => {
+describe('Money rounding policy', () => {
   test('input with more than 2 decimals is rejected, never rounded', () => {
     expect(() => Money.from({ amount: '10.005', currency: 'BRL' })).toThrow(InvalidMoneyError);
   });

@@ -7,7 +7,7 @@ As decisões técnicas, os trade-offs e as limitações estão em [ARCHITECTURE.
 
 ## Requisitos
 
-- Bun 1.x (`curl -fsSL https://bun.sh/install | bash`)
+- Bun 1.4.2 ou mais novo, a versão da CI e da imagem Docker (`curl -fsSL https://bun.sh/install | bash`)
 - Docker com Docker Compose v2
 - Portas livres no host: 5432 (PostgreSQL) e 4566 (SQS). Um PostgreSQL instalado na máquina e já rodando ocupa a 5432, e o `docker compose up` falha com `address already in use`
 
@@ -59,6 +59,19 @@ docker compose --profile app down          # para tudo, inclusive as instâncias
 ```
 
 O serviço `migrate` roda as migrations uma vez antes das instâncias subirem. Cada instância roda também o consumer da fila `wager-transactions.fifo`. Os testes criam filas próprias, então as instâncias podem ficar de pé enquanto `bun test` roda.
+
+### Endpoints
+
+| Método e rota | Para quê |
+|---|---|
+| `POST /wallets` | abre uma wallet com saldo inicial |
+| `GET /wallets/:walletId` | saldo e versão atuais |
+| `GET /wallets/:walletId/ledger?cursor=&limit=` | lançamentos, paginados por cursor |
+| `POST /wallets/:walletId/reconciliation` | saldo guardado comparado com o ledger, sem corrigir |
+| `POST /wagering/transactions` | processa uma operação (header `Idempotency-Key` obrigatório) |
+| `GET /wagering/transactions/:transactionId` | estado atual de uma transação, por exemplo uma que recebeu `202` |
+| `GET /providers/:providerId/wagering/transactions/:externalTransactionId` | a mesma consulta pelo id do provedor |
+| `GET /health/live`, `GET /health/ready`, `GET /metrics` | health checks e métricas, sem autenticação |
 
 ### Consumer SQS
 
@@ -142,7 +155,7 @@ Um REFUND enviado antes da sua BET responde `202` com `PENDING_REFERENCE`. O wor
 | `bun test` | todos os testes (unitários e de integração) |
 | `bun run test:unit` | só os unitários, sem containers |
 | `bun run test:integration` | só os de integração, precisam do `docker compose up -d` |
-| `bun run test:load` | teste de carga com 3 instâncias reais, PostgreSQL e MiniStack (cerca de 3 min, fora do `bun test` e da CI); reescreve [docs/teste-de-carga.md](docs/teste-de-carga.md) e grava os dados brutos em `load-results/` |
+| `bun run test:load` | teste de carga com 3 instâncias reais, PostgreSQL e MiniStack (cerca de 3 min, fora do `bun test` e da CI); reescreve [docs/teste-de-carga.md](docs/teste-de-carga.md) e grava os dados brutos em `load-results/`. O arquivo do repositório veio de três execuções seguidas e de `bun run test:load:summary` |
 | `bun run test:load:summary` | junta as 3 rodadas mais recentes de `load-results/` (ou os `result.json` passados como argumento): reescreve [docs/teste-de-carga.md](docs/teste-de-carga.md) com o relatório da rodada mediana e uma tabela de repetibilidade (mediana e variação de cada métrica); não gera carga |
 | `bun run migration:create <nome>` | cria uma migration vazia com `up()` e `down()` |
 | `bun run migration:up` | aplica as migrations pendentes |
@@ -164,7 +177,7 @@ Tabela completa, requisito por requisito, com o teste que prova cada um. O resum
 | Requisito do enunciado | Como verificar | Onde está |
 |---|---|---|
 | Stack: Bun, TypeScript estrito, NestJS, PostgreSQL, SQS, Docker Compose | `bun run typecheck` | `tsconfig.json`, `docker-compose.yml` |
-| Migrations versionadas e reversíveis | `bun test test/integration/migrations.test.ts` aplica e reverte cada migration no `wagering_test` e compara o schema | `src/infrastructure/persistence/migrations`, `test/integration/support/migration-reversibility.ts` |
+| Migrations versionadas e reversíveis | `bun test test/integration/migrations.test.ts` aplica e reverte cada migration num banco vazio próprio (`wagering_migrations_test`, criado e apagado pelo teste) e compara o schema | `src/infrastructure/persistence/migrations`, `test/integration/support/migration-reversibility.ts` |
 | Health de liveness e readiness, sem autenticação | `bun test test/integration/health.test.ts` | `src/interfaces/http/health.controller.ts` |
 | Readiness indica qual dependência caiu | mesmo teste: fila inexistente e endpoint sem resposta devolvem 503 com `failed: ["sqs"]` | `src/application/health/check-readiness.ts` |
 | Configuração inválida impede o boot | `bun run test:unit` | `src/infrastructure/config/app-config.ts` |
@@ -185,7 +198,7 @@ Tabela completa, requisito por requisito, com o teste que prova cada um. O resum
 | Chave de idempotência única por provedor, em qualquer formato: a mesma chave em dois provedores são duas operações; no mesmo provedor, replay ou conflito | `bun test test/integration/wagering/idempotency.test.ts test/integration/schema/wager-transactions.schema.test.ts` | migration `idempotency_key_per_provider` |
 | Wallet, transação, ledger e outbox na mesma transação SQL (tudo ou nada) | `bun test test/integration/wagering/atomicity-and-outbox.test.ts` força uma falha depois do lançamento do ledger | `src/application/wagering/process-wager-transaction.ts` |
 | A linha da inbox volta junto no rollback: a mensagem que falhou (wallet ainda inexistente) não fica marcada como recebida e é processada quando a wallet existe | `bun test test/integration/messaging/consumer-transient-failure.test.ts` | `process-wager-transaction.ts` (`executeDelivery`) |
-| Criar wallet grava a transação `OPENING` e o crédito na mesma transação; wallet duplicada é conflito | mesmo teste e `http-status-mapping.test.ts` | `src/application/wallets/open-wallet.ts` |
+| Criar wallet grava a transação `OPENING` e o crédito na mesma transação; wallet duplicada é conflito | `bun test test/integration/wagering/atomicity-and-outbox.test.ts` e `http-status-mapping.test.ts` | `src/application/wallets/open-wallet.ts` |
 | Eventos na outbox: `WalletBalanceChanged` só quando o saldo muda (LOSS não gera) | `atomicity-and-outbox.test.ts` | `src/domain/events/wagering-events.ts` |
 | Envelope dos eventos e backoff com jitter da outbox | `bun test test/unit/domain/events test/unit/domain/outbox` | `src/domain/events/integration-event.ts`, `src/domain/outbox/outbox-message.ts` |
 | Status HTTP distintos para payload inválido, conflito, rejeição, pendente e falha transitória; envelope de erro único; caracteres de controle e corpo grande demais são 400 e 413, nunca 503 ou 500 | `bun test test/integration/wagering/http-status-mapping.test.ts` | `src/interfaces/http/api-exception.filter.ts`, `src/interfaces/http/wager-response-status.ts` |

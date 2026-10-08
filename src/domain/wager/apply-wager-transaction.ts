@@ -8,7 +8,7 @@ import { WagerTransactionStatus } from './wager-transaction-status.js';
 import type { WagerTransaction } from './wager-transaction.js';
 
 export interface ApplyWagerTransactionInput {
-  /** The wallet named by transaction.walletId, loaded and locked with SELECT ... FOR NO KEY UPDATE (ADR-002). */
+  /** The wallet named by transaction.walletId, loaded and locked with SELECT ... FOR NO KEY UPDATE. */
   readonly wallet: Wallet;
   /** PENDING or PENDING_REFERENCE. */
   readonly transaction: WagerTransaction;
@@ -19,14 +19,14 @@ export interface ApplyWagerTransactionInput {
   readonly reference: WagerTransaction | undefined;
   /**
    * True when the reference already has a PROCESSED REFUND or ROLLBACK pointing to it.
-   * Blocks a second reversal (ADR-008) and the settlement (WIN/LOSS) of a reversed BET.
+   * Blocks a second reversal and the settlement (WIN/LOSS) of a reversed BET.
    */
   readonly referenceAlreadyReversed: boolean;
   /** Id for the ledger entry, used only if the balance moves. */
   readonly ledgerEntryId: string;
   readonly at: Date;
   /**
-   * The PENDING_REFERENCE worker's final check (ADR-008): if the reference still does not
+   * The PENDING_REFERENCE worker's final check: if the reference still does not
    * exist, the wait is over and the transaction is REJECTED with REFERENCE_NOT_FOUND. A
    * reference that exists but is still PENDING or PENDING_REFERENCE keeps it waiting.
    * Always false for a new submission.
@@ -53,7 +53,7 @@ export type WagerOutcome =
  * The business rules of spec section 7 in one pure function. It decides the outcome
  * and applies it to the objects in memory: the transaction changes status, and the
  * wallet changes balance only when the outcome is PROCESSED with a ledger entry.
- * Nothing is saved here. Slice 2 runs this inside one SQL transaction, with the
+ * Nothing is saved here. The use case runs this inside one SQL transaction, with the
  * wallet row locked, and writes wallet, ledger entry and transaction together.
  *
  * Order of the checks: first what only depends on the submitted payload, then what
@@ -114,7 +114,7 @@ function checkReference(input: ApplyWagerTransactionInput): FailureCode | 'WAIT'
   if (reference.status !== WagerTransactionStatus.Processed) {
     return FailureCode.ReferenceNotProcessed;
   }
-  // A reversed transaction cannot be reversed again (ADR-008) nor settled: a WIN or
+  // A reversed transaction cannot be reversed again nor settled: a WIN or
   // LOSS for a BET that was already refunded or rolled back is refused too.
   if (input.referenceAlreadyReversed) {
     return FailureCode.ReferenceAlreadyReversed;

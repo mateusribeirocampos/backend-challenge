@@ -36,7 +36,7 @@ export const MetricName = {
   /** A call to SQS that failed (receive, delete, ...). Label: operation. */
   ConsumerSqsErrors: 'wager_consumer_sqs_errors_total',
 
-  // ---- outbox publisher (ADR-005)
+  // ---- outbox publisher
   /** A send SQS confirmed (a duplicate send included, see below). Label: event_type. */
   OutboxPublished: 'wager_outbox_published_total',
   /** A send failed; the event got a new attempt with backoff. */
@@ -51,7 +51,7 @@ export const MetricName = {
   /** Gauge: age in seconds of the oldest event not published yet (0 when there is none). */
   OutboxLagSeconds: 'wager_outbox_lag_seconds',
 
-  // ---- PENDING_REFERENCE worker (ADR-008)
+  // ---- PENDING_REFERENCE worker
   /** A waiting transaction found its reference and was decided. Label: status (PROCESSED | REJECTED). */
   PendingReferencesResolved: 'wager_pending_references_resolved_total',
   /** A waiting transaction gave up: REJECTED with REFERENCE_NOT_FOUND. */

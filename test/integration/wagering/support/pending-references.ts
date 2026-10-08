@@ -4,7 +4,7 @@ import { query } from '../../schema/support/schema-sql.js';
 import { integrationConfig } from '../../support/integration-config.js';
 import { type OpenedWallet, type WagerBody, wager } from './wagering-api.js';
 
-/** Helpers for the PENDING_REFERENCE worker tests (ADR-008). */
+/** Helpers for the PENDING_REFERENCE worker tests. */
 
 /** The test config with the worker ON, checking every 20 ms with short waits. */
 export function workerConfig(worker: Partial<PendingReferenceWorkerConfig> = {}, base: AppConfig = integrationConfig()): AppConfig {

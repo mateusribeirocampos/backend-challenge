@@ -41,17 +41,3 @@ load-results/
 id_rsa*
 secrets/
 credentials*
-
-# IA
-.claude
-.agents
-CLAUDE.md
-CLAUDE.local.md
-AGENTS.md
-GEMINI.md
-.mcp.json
-.cursor/
-.cursorrules
-.windsurf/
-.aider*
-.github/copilot-instructions.md

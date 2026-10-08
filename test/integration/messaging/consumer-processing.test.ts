@@ -37,7 +37,7 @@ setDefaultTimeout(20_000);
  * Spec 10 end to end: a real message in a real FIFO queue (MiniStack), the real
  * consumer inside the real app, the real PostgreSQL. Each test has its own queues.
  */
-describe('SQS consumer: processing, deduplication and DLQ (spec 10, ADR-005)', () => {
+describe('SQS consumer: processing, deduplication and DLQ (spec 10)', () => {
   let orm: MikroORM;
   let sqs: SQSClient;
   let queues: TestQueues;

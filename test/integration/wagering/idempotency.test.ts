@@ -15,8 +15,8 @@ import {
   walletState,
 } from './support/wagering-api.js';
 
-/** ADR-003 over HTTP: the database row is the idempotency record, not memory. */
-describe('idempotency (spec 9, ADR-003)', () => {
+/** Idempotency over HTTP: the database row is the idempotency record, not memory. */
+describe('idempotency (spec 9)', () => {
   let orm: MikroORM;
   let app: RunningTestApp;
 

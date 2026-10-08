@@ -1,7 +1,7 @@
 import { Migration } from '@mikro-orm/migrations';
 
 /**
- * Tables for ADR-005. Created now so the schema is complete; the classes that use
+ * Tables of the inbox and the outbox. Created now so the schema is complete; the classes that use
  * them come with the SQS consumer and the outbox publisher.
  *
  * inbox_messages: one row per (consumer, message) already handled. The primary key is

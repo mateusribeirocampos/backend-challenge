@@ -24,7 +24,7 @@ export interface WalletRepository {
   findById(walletId: string): Promise<Wallet | undefined>;
   /**
    * Reads the wallet and locks its row until the end of the transaction
-   * (SELECT ... FOR NO KEY UPDATE, ADR-002). Another transaction asking for the same
+   * (SELECT ... FOR NO KEY UPDATE). Another transaction asking for the same
    * row waits here; other wallets are not affected.
    */
   lockById(walletId: string): Promise<Wallet | undefined>;
@@ -34,7 +34,7 @@ export interface WalletRepository {
 
 export interface WagerTransactionRepository {
   /**
-   * Insert-first idempotency (ADR-003): inserts the PENDING row unless the idempotency
+   * Insert-first idempotency: inserts the PENDING row unless the idempotency
    * key or (providerId, externalTransactionId) already exists, or the wallet does not
    * exist. true = this request owns the operation and must process it.
    */
@@ -42,7 +42,7 @@ export interface WagerTransactionRepository {
   /** Plain insert, for the OPENING transaction of a new wallet. */
   insert(transaction: WagerTransaction): Promise<void>;
   findById(transactionId: string): Promise<WagerTransaction | undefined>;
-  /** The key is unique per provider (ADR-003): two providers may send the same one. */
+  /** The key is unique per provider: two providers may send the same one. */
   findByIdempotencyKey(providerId: string, idempotencyKey: string): Promise<WagerTransaction | undefined>;
   findByProviderAndExternalId(providerId: string, externalTransactionId: string): Promise<WagerTransaction | undefined>;
   /** True when a PROCESSED REFUND or ROLLBACK already points to this transaction. */
@@ -54,7 +54,7 @@ export interface WagerTransactionRepository {
    */
   saveOutcome(transaction: WagerTransaction, options: ReferenceCheckSchedule): Promise<void>;
   /**
-   * The PENDING_REFERENCE worker's pick (ADR-008): the waiting transaction whose next
+   * The PENDING_REFERENCE worker's pick: the waiting transaction whose next
    * check is the most overdue, locked with FOR NO KEY UPDATE SKIP LOCKED until the end
    * of the SQL transaction. A row another worker holds is skipped, not waited for, and
    * so are skipIds (rows that already failed in this batch).
@@ -124,7 +124,7 @@ export interface OutboxRepository {
 
 export interface InboxRepository {
   /**
-   * Inserts the row unless (consumerName, messageId) already exists (ADR-005).
+   * Inserts the row unless (consumerName, messageId) already exists.
    * true = first time this consumer handles the message. If another transaction is
    * inserting the same pair, this call waits for it to finish first.
    */

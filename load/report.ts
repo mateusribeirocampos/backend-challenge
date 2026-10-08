@@ -7,11 +7,12 @@ import type { CheckResult, Environment, LoadRunResult, ScenarioResult, StepResul
  * function of the result: the same JSON always gives the same report, and the unit test
  * checks it without running any load.
  */
-export function renderReport(result: LoadRunResult): string {
+/** origin: what wrote the file, for the header (the summary of several runs passes its own). */
+export function renderReport(result: LoadRunResult, origin = `\`bun run test:load\` em ${result.finishedAt}`): string {
   return [
     '# Teste de carga',
     '',
-    `> Gerado por \`bun run test:load\` em ${result.finishedAt}. Não editar à mão: uma nova execução reescreve este arquivo. Os números valem para a máquina descrita em "Ambiente". Os dados brutos ficam em \`load-results/\` (fora do git).`,
+    `> Gerado por ${origin}. Não editar à mão: uma nova execução reescreve este arquivo. Os números valem para a máquina descrita em "Ambiente". Os dados brutos ficam em \`load-results/\` (fora do git).`,
     '',
     summarySection(result),
     environmentSection(result.environment),

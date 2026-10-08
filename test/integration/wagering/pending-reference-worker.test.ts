@@ -22,7 +22,7 @@ setDefaultTimeout(20_000);
 
 /**
  * Spec 7.1 and spec 13 item 7, over HTTP: a REFUND that arrives before its BET waits in
- * PENDING_REFERENCE, and the worker (ADR-008) decides it later through the same rules.
+ * PENDING_REFERENCE, and the worker decides it later through the same rules.
  */
 describe('PENDING_REFERENCE worker', () => {
   let orm: MikroORM;

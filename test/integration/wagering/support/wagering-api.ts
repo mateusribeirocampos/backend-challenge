@@ -4,7 +4,7 @@ import type { MikroORM } from '@mikro-orm/postgresql';
 import { query } from '../../schema/support/schema-sql.js';
 
 /**
- * Helpers for the HTTP tests of Slice 2: real requests to the real Nest app, and
+ * Helpers for the HTTP tests: real requests to the real Nest app, and
  * direct reads of wagering_test to check what was (or was not) written.
  */
 

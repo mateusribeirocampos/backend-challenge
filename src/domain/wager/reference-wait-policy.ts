@@ -1,7 +1,7 @@
 import { backoffDelayMs, type BackoffPolicy } from '../shared/exponential-backoff.js';
 
 /**
- * How long a PENDING_REFERENCE transaction waits for its reference (spec 7.1, ADR-008).
+ * How long a PENDING_REFERENCE transaction waits for its reference (spec 7.1).
  * The worker checks it right after it is stored, then after each failed check waits
  * backoffDelayMs(n): 1 s, 2 s, 4 s ... up to 60 s, with jitter. On check number
  * maxAttempts, a reference that still does not exist ends the wait: REJECTED with

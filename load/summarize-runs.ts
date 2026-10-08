@@ -32,7 +32,8 @@ if (paths.length < 2) {
 const results = paths.map((path) => JSON.parse(readFileSync(path, 'utf8')) as LoadRunResult);
 const mainIndex = medianRunIndex(results);
 const reportPath = resolve(root, loadSettings(process.env).reportPath);
-writeFileSync(reportPath, `${renderReport(results[mainIndex] as LoadRunResult).trimEnd()}\n\n${renderRepeatability(results, mainIndex)}`);
+const origin = `\`bun run test:load:summary\` a partir de ${results.length} execuções de \`bun run test:load\` (a última terminou em ${results.at(-1)?.finishedAt}); o detalhe abaixo é o da rodada ${mainIndex + 1}`;
+writeFileSync(reportPath, `${renderReport(results[mainIndex] as LoadRunResult, origin).trimEnd()}\n\n${renderRepeatability(results, mainIndex)}`);
 
 console.log(`runs: ${paths.join(', ')}`);
 console.log(`main report: run ${mainIndex + 1} (${paths[mainIndex]})`);

@@ -7,7 +7,7 @@ import { toOutboxMessage, toOutboxMessageRecord } from '../mappers/outbox-messag
 const EVENT_COLUMNS = 'id, aggregate_id, event_type, payload, occurred_at, attempts, next_attempt_at, published_at';
 
 /**
- * The claim of the outbox publisher, in one statement (ADR-005):
+ * The claim of the outbox publisher, in one statement:
  *
  *   heads: wallets whose OLDEST unpublished event is due and not leased. That event is
  *          locked with FOR UPDATE SKIP LOCKED: two publishers claiming at the same time

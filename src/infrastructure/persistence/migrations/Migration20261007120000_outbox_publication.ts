@@ -1,7 +1,7 @@
 import { Migration } from '@mikro-orm/migrations';
 
 /**
- * What the outbox publisher (Slice 4, ADR-005) needs from outbox_messages:
+ * What the outbox publisher needs from outbox_messages:
  *
  *   - sequence_number: the order the events were written. Events of one wallet are
  *     written under the wallet lock, so for one wallet this is the commit order, even

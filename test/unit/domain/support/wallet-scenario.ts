@@ -11,7 +11,7 @@ import type { WalletLedgerEntry } from '../../../../src/domain/wallet/wallet-led
 import { LATER, PROVIDER_ID, type SubmitOptions, submitted } from './domain-fixtures.js';
 
 /**
- * Plays transactions against one wallet the way Slice 2 will: resolve the reference
+ * Plays transactions against one wallet the way the use case does: resolve the reference
  * by (provider, external id), ask whether it was already reversed, apply, keep the
  * result. The lookups are an in-memory stand-in for the SQL queries, so the tests
  * exercise only the domain rules.
@@ -40,7 +40,7 @@ export class WalletScenario {
 
   /**
    * Applies a stored transaction, e.g. a PENDING_REFERENCE one after its reference arrived.
-   * lastReferenceCheck: the PENDING_REFERENCE worker's final check (ADR-008).
+   * lastReferenceCheck: the PENDING_REFERENCE worker's final check.
    */
   apply(transaction: WagerTransaction, options: { lastReferenceCheck?: boolean } = {}): WagerOutcome {
     const reference = this.find(transaction.referenceExternalTransactionId);

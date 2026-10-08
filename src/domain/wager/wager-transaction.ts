@@ -86,7 +86,7 @@ export interface WagerTransactionState {
   readonly status: WagerTransactionStatus;
   readonly referenceTransactionId: string | undefined;
   readonly failureCode: FailureCode | undefined;
-  /** Wallet balance observed when the transaction was decided; returned again on replay (ADR-003). */
+  /** Wallet balance observed when the transaction was decided; returned again on replay. */
   readonly resultBalance: Money | undefined;
   readonly processedAt: Date | undefined;
   readonly updatedAt: Date;
@@ -398,7 +398,7 @@ export class WagerTransaction {
   /**
    * BET, WIN, REFUND and ROLLBACK must move money, so they need amount > 0.
    * LOSS never moves money and accepts >= 0 (the provider may send the stake or zero).
-   * A zero WIN is refused: a win of zero is a LOSS (vault ADR-009).
+   * A zero WIN is refused: a win of zero is a LOSS.
    */
   private static assertAmount(kind: WagerTransactionKind, money: Money): void {
     if (money.isNegative()) {

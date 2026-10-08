@@ -70,7 +70,7 @@ export interface WagerConsumerConfig {
   readonly retryMaxDelaySeconds: number;
 }
 
-/** The outbox publisher (spec 11, ADR-005), a loop inside every app instance. */
+/** The outbox publisher (spec 11), a loop inside every app instance. */
 export interface OutboxPublisherConfig {
   /** false: this instance does not publish. The integration tests start their publishers explicitly. */
   readonly enabled: boolean;
@@ -84,7 +84,7 @@ export interface OutboxPublisherConfig {
   readonly pollIntervalMs: number;
 }
 
-/** The PENDING_REFERENCE worker (spec 7.1, ADR-008), a loop inside every app instance. */
+/** The PENDING_REFERENCE worker (spec 7.1), a loop inside every app instance. */
 export interface PendingReferenceWorkerConfig {
   /** false: this instance does not check pending references. The integration tests start theirs explicitly. */
   readonly enabled: boolean;

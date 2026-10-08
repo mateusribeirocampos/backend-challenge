@@ -20,10 +20,10 @@ import {
 } from './support/wagering-api.js';
 
 /**
- * ADR-007: the provider decides "resend, fix or give up" from the status code alone,
+ * The provider decides "resend, fix or give up" from the status code alone,
  * and the same situation has the same code on every endpoint.
  */
-describe('HTTP status mapping (ADR-007)', () => {
+describe('HTTP status mapping', () => {
   let orm: MikroORM;
   let app: RunningTestApp;
   let wallet: OpenedWallet;

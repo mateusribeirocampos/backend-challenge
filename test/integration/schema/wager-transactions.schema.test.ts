@@ -59,7 +59,7 @@ async function processedBet(): Promise<{ id: string; externalId: string }> {
   return { id, externalId };
 }
 
-describe('wager_transactions: idempotency (ADR-003)', () => {
+describe('wager_transactions: idempotency', () => {
   test('the same idempotency key twice for one provider is refused (wager_transactions_provider_idempotency_key_unique)', async () => {
     const key = `key-${newId()}`;
     await insertTransaction({ idempotency_key: key });
@@ -141,7 +141,7 @@ describe('wager_transactions: references', () => {
   });
 });
 
-describe('wager_transactions: single reversal of any kind (ADR-008)', () => {
+describe('wager_transactions: single reversal of any kind', () => {
   test('second PROCESSED REFUND of the same BET is refused (wager_transactions_single_reversal)', async () => {
     const bet = await processedBet();
     await runInOneTransaction(orm, insert('wager_transactions', reversalOf(bet.id, bet.externalId, 'REFUND')));

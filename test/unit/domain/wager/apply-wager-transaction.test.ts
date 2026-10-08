@@ -256,7 +256,7 @@ describe('ROLLBACK', () => {
   });
 });
 
-describe('ADR-008: a transaction is reversed at most once, by any reversal kind', () => {
+describe('a transaction is reversed at most once, by any reversal kind', () => {
   test('balance 100, BET 25, REFUND, then ROLLBACK of the same BET: rejected, balance 100 and not 125', () => {
     const scenario = scenarioWith('100.00');
     const bet = scenario.play({ kind: 'BET', money: brl('25.00'), externalTransactionId: 'b1' });
@@ -455,7 +455,7 @@ describe('reference out of order (spec 13, concurrency item 7, at the domain lev
   });
 });
 
-describe('the last reference check of the PENDING_REFERENCE worker (ADR-008)', () => {
+describe('the last reference check of the PENDING_REFERENCE worker', () => {
   test('the reference never arrived: REJECTED with REFERENCE_NOT_FOUND, balance unchanged, no ledger entry', () => {
     const scenario = scenarioWith('100.00');
     const refund = scenario.play({ kind: 'REFUND', money: brl('25.00'), externalTransactionId: 'r1', referenceExternalTransactionId: 'b1' });
