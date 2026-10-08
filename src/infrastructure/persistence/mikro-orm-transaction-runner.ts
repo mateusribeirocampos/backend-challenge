@@ -1,6 +1,7 @@
 import { IsolationLevel } from '@mikro-orm/core';
 import type { EntityManager, MikroORM } from '@mikro-orm/postgresql';
 import { LockContentionError, TransientInfrastructureError } from '../../application/errors.js';
+import type { Metrics } from '../../application/ports/metrics.js';
 import type { Repositories } from '../../application/ports/repositories.js';
 import type { TransactionRunner } from '../../application/ports/transaction-runner.js';
 import { isLockContentionError, isTransientDatabaseError } from './database-error-classifier.js';
@@ -23,7 +24,10 @@ export const LOCK_TIMEOUT = '2s';
  * explicit: the boundary is this call, not a proxy around a method.
  */
 export class MikroOrmTransactionRunner implements TransactionRunner {
-  constructor(private readonly orm: MikroORM) {}
+  constructor(
+    private readonly orm: MikroORM,
+    private readonly metrics: Metrics,
+  ) {}
 
   async run<T>(work: (repositories: Repositories) => Promise<T>): Promise<T> {
     try {
@@ -31,7 +35,7 @@ export class MikroOrmTransactionRunner implements TransactionRunner {
         async (em) => {
           // SET LOCAL: only for this transaction; the pooled connection goes back clean.
           await em.execute(`set local lock_timeout = '${LOCK_TIMEOUT}'`);
-          return work(repositoriesFor(em));
+          return work(repositoriesFor(em, this.metrics));
         },
         // PostgreSQL's default, written down because the design relies on it: after
         // waiting for a lock, the next statement sees what the other transaction committed.
@@ -52,9 +56,9 @@ export class MikroOrmTransactionRunner implements TransactionRunner {
   }
 }
 
-function repositoriesFor(em: EntityManager): Repositories {
+function repositoriesFor(em: EntityManager, metrics: Metrics): Repositories {
   return {
-    wallets: new MikroOrmWalletRepository(em),
+    wallets: new MikroOrmWalletRepository(em, metrics),
     transactions: new MikroOrmWagerTransactionRepository(em),
     ledger: new MikroOrmLedgerRepository(em),
     outbox: new MikroOrmOutboxRepository(em),

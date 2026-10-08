@@ -21,6 +21,12 @@ export const MetricName = {
    * Label: source.
    */
   LockConflicts: 'wager_lock_conflicts_total',
+  /**
+   * Histogram: seconds spent waiting for the wallet row lock (SELECT ... FOR NO KEY UPDATE),
+   * whether the lock was then granted or lost. Shows contention that ends well, which
+   * LockConflicts does not count: two BETs on one wallet queue for milliseconds.
+   */
+  WalletLockWait: 'wager_wallet_lock_wait_seconds',
   /** Transient failure: the message was left in the queue to come back later. Label: error_code. */
   MessageRetries: 'wager_message_retries_total',
   /** Sent to the DLQ by the consumer. Label: reason. */

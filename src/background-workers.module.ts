@@ -69,8 +69,8 @@ export class BackgroundWorkersModule implements OnApplicationBootstrap, BeforeAp
         },
         {
           provide: BACKGROUND_TRANSACTION_RUNNER,
-          useFactory: (orm: MikroORM): TransactionRunner => new MikroOrmTransactionRunner(orm),
-          inject: [BACKGROUND_ORM],
+          useFactory: (orm: MikroORM, metrics: Metrics): TransactionRunner => new MikroOrmTransactionRunner(orm, metrics),
+          inject: [BACKGROUND_ORM, METRICS],
         },
         {
           provide: EVENT_PUBLISHER,
