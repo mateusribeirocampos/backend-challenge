@@ -9,15 +9,35 @@ import {
   schemaFingerprint,
 } from './support/migration-reversibility.js';
 
+/**
+ * Reversibility is a property of the schema, so it is checked on an empty database of its
+ * own. The shared test database holds rows left by other tests, and a migration that
+ * relaxes a constraint (idempotency_key_per_provider) cannot go back once those rows use
+ * the relaxed rule: that is about data, not about down() being complete.
+ */
+const MIGRATIONS_DATABASE = 'wagering_migrations_test';
+
+async function onAdminConnection(sql: string): Promise<void> {
+  const admin = await MikroORM.init({ ...buildMikroOrmConfig(integrationConfig().database), debug: false });
+  try {
+    await admin.em.getConnection().execute(sql);
+  } finally {
+    await admin.close(true);
+  }
+}
+
 describe('project migrations', () => {
   let orm: MikroORM;
 
   beforeAll(async () => {
-    orm = await MikroORM.init(buildMikroOrmConfig(integrationConfig().database));
+    await onAdminConnection(`drop database if exists ${MIGRATIONS_DATABASE} with (force)`);
+    await onAdminConnection(`create database ${MIGRATIONS_DATABASE}`);
+    orm = await MikroORM.init(buildMikroOrmConfig({ ...integrationConfig().database, dbName: MIGRATIONS_DATABASE }));
   });
 
   afterAll(async () => {
     await orm.close(true);
+    await onAdminConnection(`drop database if exists ${MIGRATIONS_DATABASE} with (force)`);
   });
 
   test('every migration in src/infrastructure/persistence/migrations is reversible', async () => {
