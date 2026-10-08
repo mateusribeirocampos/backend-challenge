@@ -68,8 +68,9 @@ export class Money {
     // A number can still arrive here at runtime (JSON body, any cast). Refuse it
     // instead of converting: 0.1 as a number is already not 0.10.
     if (typeof props.amount !== 'string' || !AMOUNT_PATTERN.test(props.amount)) {
+      // The value is not echoed: this text reaches logs and DLQ attributes (spec 12).
       throw new InvalidMoneyError(
-        `Invalid amount ${JSON.stringify(props.amount)}: expected a non-negative decimal string with at most ${MONEY_SCALE} decimals`,
+        `Invalid amount: expected a non-negative decimal string with at most ${MONEY_SCALE} decimals`,
       );
     }
     return new Money(new MoneyDecimal(props.amount), currency);

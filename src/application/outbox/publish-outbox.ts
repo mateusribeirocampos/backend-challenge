@@ -1,4 +1,5 @@
 import type { OutboxMessage, RetryPolicy } from '../../domain/outbox/outbox-message.js';
+import { summarizeError } from '../error-summary.js';
 import type { Clock } from '../ports/clock.js';
 import type { EventPublisher } from '../ports/event-publisher.js';
 import type { IdGenerator } from '../ports/id-generator.js';
@@ -116,7 +117,7 @@ export class PublishOutbox {
       return true;
     } catch (error) {
       this.metrics.increment(MetricName.OutboxPublishFailures);
-      this.logger.warn('outbox.publish_failed', { ...fieldsOf(event), attempts: event.attempts + 1, error: describe(error) });
+      this.logger.warn('outbox.publish_failed', { ...fieldsOf(event), attempts: event.attempts + 1, ...summarizeError(error) });
       return false;
     }
   }
@@ -200,16 +201,27 @@ function sum(total: PublishBatchResult, part: PublishBatchResult): PublishBatchR
 }
 
 /** Ids for the logs (spec 12). Never the payload: it carries amounts. */
+/** Identifiers only (spec 12): the event's data also has amounts and balances, which stay out of the logs. */
 function fieldsOf(event: OutboxMessage) {
-  return { walletId: event.aggregateId, eventId: event.id, eventType: event.eventType, correlationId: correlationIdOf(event) };
+  const { causationId, data } = event.payload;
+  const eventData = typeof data === 'object' && data !== null ? (data as Record<string, unknown>) : {};
+  return {
+    walletId: event.aggregateId,
+    eventId: event.id,
+    eventType: event.eventType,
+    correlationId: correlationIdOf(event),
+    messageId: textOrUndefined(causationId),
+    transactionId: textOrUndefined(eventData.transactionId),
+    providerId: textOrUndefined(eventData.providerId),
+  };
+}
+
+function textOrUndefined(value: unknown): string | undefined {
+  return typeof value === 'string' ? value : undefined;
 }
 
 /** The correlationId of the request or message that caused the event, from its envelope. */
 function correlationIdOf(event: OutboxMessage): string {
   const { correlationId } = event.payload;
   return typeof correlationId === 'string' ? correlationId : '';
-}
-
-function describe(error: unknown): string {
-  return error instanceof Error ? `${error.name}: ${error.message}`.slice(0, 256) : String(error);
 }

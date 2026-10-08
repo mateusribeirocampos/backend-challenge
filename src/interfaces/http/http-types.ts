@@ -6,6 +6,9 @@ export interface HttpRequest {
   readonly method: string;
   readonly url: string;
   readonly headers: Readonly<Record<string, string | string[] | undefined>>;
+  /** The parsed JSON body and the route parameters, as Express sets them. */
+  readonly body?: unknown;
+  readonly params?: Readonly<Record<string, string>>;
   /** Set by CorrelationIdMiddleware. */
   correlationId?: string;
 }

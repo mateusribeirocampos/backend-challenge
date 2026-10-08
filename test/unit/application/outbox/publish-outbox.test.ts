@@ -31,7 +31,12 @@ function event(id: string, aggregateId: string, attempts = 0): OutboxMessage {
     id,
     aggregateId,
     eventType: 'WagerTransactionProcessed',
-    payload: { eventId: id, correlationId: `corr-${id}` },
+    payload: {
+      eventId: id,
+      correlationId: `corr-${id}`,
+      causationId: `msg-${id}`,
+      data: { transactionId: `tx-${id}`, providerId: 'provider-a', amount: { amount: '125.00', currency: 'BRL' } },
+    },
     occurredAt: new Date('2026-10-07T11:59:50.000Z'),
     attempts,
     nextAttemptAt: new Date('2026-10-07T11:59:50.000Z'),
@@ -241,8 +246,17 @@ describe('PublishOutbox.publishBatch', () => {
     await publisher.publishBatch();
 
     expect(logs.events('outbox.publish_failed')[0]?.fields).toEqual(
-      expect.objectContaining({ eventId: 'a1', walletId: WALLET_A, correlationId: 'corr-a1', attempts: 1 }),
+      expect.objectContaining({
+        eventId: 'a1',
+        walletId: WALLET_A,
+        correlationId: 'corr-a1',
+        messageId: 'msg-a1',
+        transactionId: 'tx-a1',
+        providerId: 'provider-a',
+        attempts: 1,
+      }),
     );
+    expect(JSON.stringify(logs.lines)).not.toContain('125.00');
     expect(logs.events('outbox.lease_released')[0]?.fields).toEqual(
       expect.objectContaining({ walletId: WALLET_A, count: 1, correlationIds: 'corr-a2' }),
     );
@@ -261,6 +275,9 @@ describe('PublishOutbox.publishBatch', () => {
         eventId: 'a1',
         eventType: 'WagerTransactionProcessed',
         correlationId: 'corr-a1',
+        messageId: 'msg-a1',
+        transactionId: 'tx-a1',
+        providerId: 'provider-a',
         attempts: 10,
         nextAttemptAt: expect.any(String),
       },

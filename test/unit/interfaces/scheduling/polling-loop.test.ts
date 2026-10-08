@@ -60,7 +60,7 @@ describe('PollingLoop', () => {
       'publisher',
       async () => {
         runs += 1;
-        if (runs === 1) throw new Error('database down');
+        if (runs === 1) throw Object.assign(new Error('database down'), { code: 'ECONNREFUSED' });
         return false;
       },
       SETTINGS,
@@ -72,7 +72,7 @@ describe('PollingLoop', () => {
     await loop.stop();
 
     expect(logs.events('worker.run_failed')[0]?.fields).toEqual(
-      expect.objectContaining({ worker: 'publisher', error: 'Error: database down', consecutiveFailures: 1 }),
+      expect.objectContaining({ worker: 'publisher', errorClass: 'Error', errorCode: 'ECONNREFUSED', consecutiveFailures: 1 }),
     );
   });
 

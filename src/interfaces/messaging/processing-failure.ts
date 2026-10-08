@@ -1,4 +1,6 @@
+import { errorSummaryText, summarizeError } from '../../application/error-summary.js';
 import {
+  ApplicationError,
   ExternalTransactionIdConflictError,
   IdempotencyKeyConflictError,
   LockContentionError,
@@ -43,7 +45,7 @@ export type ProcessingFailure =
       readonly kind: 'permanent';
       readonly reason: DeadLetterReason;
       readonly errorCode: string;
-      /** Short text for the DLQ attributes. */
+      /** Short text for the DLQ attributes, never raw driver text (see safeDetail). */
       readonly detail: string;
     };
 
@@ -81,8 +83,19 @@ export function classifyProcessingFailure(error: unknown): ProcessingFailure {
 }
 
 function permanent(reason: DeadLetterReason, errorCode: string, error: unknown): ProcessingFailure {
-  const message = error instanceof Error ? error.message : String(error);
-  return { kind: 'permanent', reason, errorCode, detail: message.slice(0, MAX_DETAIL_LENGTH) };
+  return { kind: 'permanent', reason, errorCode, detail: safeDetail(error).slice(0, MAX_DETAIL_LENGTH) };
+}
+
+/**
+ * Our own errors keep their message: we wrote it, and it names identifiers and rules only
+ * ("Message msg-1 was already handled..."). Any other error (driver, ORM, runtime) is
+ * reduced to class, code and constraint: its message may hold the SQL with its parameters.
+ */
+function safeDetail(error: unknown): string {
+  if (error instanceof ApplicationError || error instanceof DomainError) {
+    return error.message;
+  }
+  return errorSummaryText(summarizeError(error));
 }
 
 /** The SQLSTATE of a database error, the code of a domain error, or the error class name. */

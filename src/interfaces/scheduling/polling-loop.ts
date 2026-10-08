@@ -1,4 +1,5 @@
 import { setTimeout as sleep } from 'node:timers/promises';
+import { summarizeError } from '../../application/error-summary.js';
 import type { StructuredLogger } from '../../application/ports/structured-logger.js';
 
 export interface PollingLoopSettings {
@@ -74,7 +75,7 @@ export class PollingLoop {
       } catch (error) {
         // Never let the loop die: log, wait longer each time, try again.
         consecutiveFailures += 1;
-        this.logger.error('worker.run_failed', { worker: this.name, consecutiveFailures, error: describe(error) });
+        this.logger.error('worker.run_failed', { worker: this.name, consecutiveFailures, ...summarizeError(error) });
         await this.pause(this.errorDelayMs(consecutiveFailures));
       }
     }
@@ -99,8 +100,4 @@ async function settlesWithin(work: Promise<void>, timeoutMs: number): Promise<bo
   const finished = await Promise.race([work.then(() => true), timedOut]);
   timer.abort();
   return finished;
-}
-
-function describe(error: unknown): string {
-  return error instanceof Error ? `${error.name}: ${error.message}`.slice(0, 256) : String(error);
 }

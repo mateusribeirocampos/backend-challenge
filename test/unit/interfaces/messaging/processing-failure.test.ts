@@ -112,8 +112,20 @@ describe('classifyProcessingFailure', () => {
   });
 
   test('the detail is cut to 256 characters: a DLQ attribute, not a dump', () => {
-    const classified = classifyProcessingFailure(new TypeError('x'.repeat(1000)));
+    const classified = classifyProcessingFailure(new IdempotencyKeyConflictError(`provider-a:${'x'.repeat(1000)}`));
 
     expect(classified.kind === 'permanent' && classified.detail.length).toBe(256);
+  });
+
+  test('an unexpected error ships class, SQLSTATE and constraint, never its message (review point F)', () => {
+    const error = Object.assign(databaseError('23514', 'update wallets set balance_amount = -987.65 - violates check'), {
+      constraint: 'wallets_balance_non_negative',
+    });
+
+    const classified = classifyProcessingFailure(error);
+
+    expect(classified).toEqual(
+      expect.objectContaining({ errorCode: '23514', detail: 'Error code=23514 constraint=wallets_balance_non_negative' }),
+    );
   });
 });

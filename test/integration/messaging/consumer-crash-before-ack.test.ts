@@ -78,7 +78,7 @@ describe('SQS consumer: crash between commit and ack', () => {
     try {
       await waitUntil('the redelivery is acked by the second consumer', async () =>
         (await isEmpty(sqs, queues.url)) &&
-        survivor.metrics.value(MetricName.DuplicatesDetected, { layer: 'inbox' }) === 1,
+        survivor.metrics.value(MetricName.DuplicatesDetected, { layer: 'inbox', source: 'sqs' }) === 1,
       );
       expect(survivor.metrics.value(MetricName.MessagesProcessed, { status: 'PROCESSED' })).toBe(0);
       expect(Number(survivor.logs.events('wager_message.duplicate')[0]?.fields.receiveCount)).toBe(2);

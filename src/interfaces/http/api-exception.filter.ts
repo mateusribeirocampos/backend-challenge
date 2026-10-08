@@ -1,4 +1,5 @@
-import { type ArgumentsHost, Catch, type ExceptionFilter, HttpException, HttpStatus, Logger } from '@nestjs/common';
+import { type ArgumentsHost, Catch, type ExceptionFilter, HttpException, HttpStatus, Inject } from '@nestjs/common';
+import { summarizeError } from '../../application/error-summary.js';
 import {
   type ApplicationError,
   ExternalTransactionIdConflictError,
@@ -9,6 +10,7 @@ import {
   WalletAlreadyExistsError,
   WalletNotFoundError,
 } from '../../application/errors.js';
+import { type LogFields, STRUCTURED_LOGGER, type StructuredLogger } from '../../application/ports/structured-logger.js';
 import { InvalidMoneyError } from '../../domain/money/money.js';
 import { ContractViolationCode } from '../../domain/wager/failure-code.js';
 import { InvalidWagerTransactionError } from '../../domain/wager/wager-transaction.js';
@@ -42,7 +44,7 @@ interface MappedError {
  */
 @Catch()
 export class ApiExceptionFilter implements ExceptionFilter {
-  private readonly logger = new Logger(ApiExceptionFilter.name);
+  constructor(@Inject(STRUCTURED_LOGGER) private readonly logger: StructuredLogger) {}
 
   catch(exception: unknown, host: ArgumentsHost): void {
     const http = host.switchToHttp();
@@ -52,10 +54,15 @@ export class ApiExceptionFilter implements ExceptionFilter {
 
     const mapped = this.map(exception);
     if (mapped.status >= HttpStatus.INTERNAL_SERVER_ERROR) {
-      this.logger.error(
-        `${request.method} ${request.url} failed (correlationId ${correlationId})`,
-        exception instanceof Error ? exception.stack : String(exception),
-      );
+      // Never the message or the stack: a driver error carries the SQL and its parameters (spec 12).
+      this.logger.error('http.request_failed', {
+        correlationId,
+        method: request.method,
+        path: request.url.split('?')[0],
+        status: mapped.status,
+        ...identifiersOf(request),
+        ...summarizeError(exception),
+      });
     }
     if (mapped.status === HttpStatus.SERVICE_UNAVAILABLE) {
       response.setHeader('Retry-After', RETRY_AFTER_SECONDS);
@@ -156,4 +163,21 @@ function clientErrorStatusOf(exception: unknown): number | undefined {
   const { status, statusCode } = exception as { status?: unknown; statusCode?: unknown };
   const candidate = typeof status === 'number' ? status : statusCode;
   return typeof candidate === 'number' && candidate >= 400 && candidate < 500 ? candidate : undefined;
+}
+
+const LOGGED_IDENTIFIERS = ['walletId', 'providerId', 'transactionId'] as const;
+const SAFE_IDENTIFIER = /^[A-Za-z0-9._:-]{1,128}$/;
+
+/** walletId, providerId and transactionId from the body or the route, when they look like identifiers. */
+function identifiersOf(request: HttpRequest): LogFields {
+  const body = typeof request.body === 'object' && request.body !== null ? (request.body as Record<string, unknown>) : {};
+  const sources: Record<string, unknown> = { ...body, ...request.params };
+  const fields: Record<string, string> = {};
+  for (const name of LOGGED_IDENTIFIERS) {
+    const value = sources[name];
+    if (typeof value === 'string' && SAFE_IDENTIFIER.test(value)) {
+      fields[name] = value;
+    }
+  }
+  return fields;
 }
