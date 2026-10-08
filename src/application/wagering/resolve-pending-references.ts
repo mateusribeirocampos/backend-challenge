@@ -1,4 +1,5 @@
 import { FailureCode } from '../../domain/wager/failure-code.js';
+import { summarizeError } from '../error-summary.js';
 import {
   isLastReferenceCheck,
   nextReferenceCheckAt,
@@ -100,7 +101,7 @@ export class ResolvePendingReferences {
           // The correlationId the check would have written in its events (see check).
           correlationId: error.transactionId,
           walletId: error.walletId,
-          error: describe(error.cause),
+          ...summarizeError(error.cause),
         });
       }
     }
@@ -177,8 +178,4 @@ export class ResolvePendingReferences {
     this.logger.info('pending_reference.resolved', fields);
     return 'resolved';
   }
-}
-
-function describe(error: unknown): string {
-  return error instanceof Error ? `${error.name}: ${error.message}`.slice(0, 256) : String(error);
 }

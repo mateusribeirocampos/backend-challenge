@@ -85,7 +85,7 @@ class FakeDatabase {
       },
       wallets: {
         lockById: async (walletId: string) => {
-          if (this.failingWallets.has(walletId)) throw new Error('lock timeout');
+          if (this.failingWallets.has(walletId)) throw Object.assign(new Error('lock timeout'), { code: '55P03' });
           return this.wallet;
         },
         saveBalance: async (wallet: Wallet) => {
@@ -127,7 +127,7 @@ function harness(balance = '75.00') {
       const result = await work(database.repositories());
       // The callback finished; the failure comes from the COMMIT itself.
       if (database.lastPicked !== undefined && database.commitFailsFor.has(database.lastPicked)) {
-        throw new Error('deferred trigger refused the commit');
+        throw Object.assign(new Error('deferred trigger refused the commit'), { code: 'P0001' });
       }
       return result;
     },
@@ -253,7 +253,8 @@ describe('ResolvePendingReferences', () => {
     expect(result).toEqual({ checked: 1, resolved: 0, stillWaiting: 1, expired: 0, failed: 1 });
     expect(database.skipRequests).toEqual([[], [stuck.id], [stuck.id]]);
     expect(logs.events('pending_reference.check_failed')[0]?.fields).toEqual(
-      expect.objectContaining({ transactionId: stuck.id, correlationId: stuck.id, error: 'Error: lock timeout' }),
+      // Class and SQLSTATE only: the message of a database error may carry SQL parameters (spec 12).
+      expect.objectContaining({ transactionId: stuck.id, correlationId: stuck.id, errorClass: 'Error', errorCode: '55P03' }),
     );
   });
 
@@ -269,7 +270,7 @@ describe('ResolvePendingReferences', () => {
     expect(result).toEqual({ checked: 1, resolved: 0, stillWaiting: 1, expired: 0, failed: 1 });
     expect(database.skipRequests).toEqual([[], [broken.id], [broken.id]]);
     expect(logs.events('pending_reference.check_failed')[0]?.fields).toEqual(
-      expect.objectContaining({ transactionId: broken.id, error: 'Error: deferred trigger refused the commit' }),
+      expect.objectContaining({ transactionId: broken.id, errorClass: 'Error', errorCode: 'P0001' }),
     );
   });
 

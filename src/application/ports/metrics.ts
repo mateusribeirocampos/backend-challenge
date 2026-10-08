@@ -1,16 +1,24 @@
 /**
- * Counters and gauges of the system (spec 12). The names follow the Prometheus
- * convention (_total for counters); the adapter that exposes them comes with the
- * observability work.
+ * Counters, gauges and the latency histogram of the system (spec 12). The names follow
+ * the Prometheus convention (_total for counters, _seconds for durations); GET /metrics
+ * exposes them.
  */
 export const MetricName = {
   /** First processing of a message, by the status the transaction got. Label: status. */
   MessagesProcessed: 'wager_messages_processed_total',
-  /** A duplicate stopped before any effect. Label: layer = inbox | idempotency_key. */
+  /** First processing of a POST /wagering/transactions, by the status the transaction got. Label: status. */
+  HttpTransactions: 'wager_http_transactions_total',
+  /**
+   * Histogram: seconds the use case took (in-process lock retries included). Label:
+   * source = http | sqs. Buckets in InMemoryMetrics.
+   */
+  ProcessingDuration: 'wager_processing_duration_seconds',
+  /** A duplicate stopped before any effect. Labels: layer = inbox | idempotency_key, source = http | sqs. */
   DuplicatesDetected: 'wager_duplicates_detected_total',
   /**
    * A transaction lost a row lock (lock timeout, deadlock, serialization) and was run
-   * again in the same process. Spec 12: "conflitos de lock".
+   * again in the same process (sqs), or answered 503 (http). Spec 12: "conflitos de lock".
+   * Label: source.
    */
   LockConflicts: 'wager_lock_conflicts_total',
   /** Transient failure: the message was left in the queue to come back later. Label: error_code. */
@@ -55,6 +63,8 @@ export interface Metrics {
   increment(name: MetricName, labels?: MetricLabels): void;
   /** A value that goes up and down (a gauge), such as the outbox lag. */
   setGauge(name: MetricName, value: number, labels?: MetricLabels): void;
+  /** One observation of a histogram, such as a duration in seconds. */
+  observe(name: MetricName, value: number, labels?: MetricLabels): void;
 }
 
 export const METRICS = Symbol('METRICS');

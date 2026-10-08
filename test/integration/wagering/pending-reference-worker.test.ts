@@ -208,7 +208,7 @@ describe('PENDING_REFERENCE worker', () => {
 
       expect(result).toEqual({ checked: 1, resolved: 1, stillWaiting: 0, expired: 0, failed: 1 });
       expect(app.logs.events('pending_reference.check_failed')[0]?.fields).toEqual(
-        expect.objectContaining({ walletId: busy.id, error: expect.stringContaining('LockContentionError') }),
+        expect.objectContaining({ walletId: busy.id, errorClass: 'LockContentionError', causeCode: '55P03' }),
       );
     } finally {
       await holder.run('rollback');
@@ -250,7 +250,7 @@ describe('PENDING_REFERENCE worker', () => {
 
       expect(result).toEqual({ checked: 1, resolved: 1, stillWaiting: 0, expired: 0, failed: 1 });
       expect(app.logs.events('pending_reference.check_failed')[0]?.fields).toEqual(
-        expect.objectContaining({ transactionId: brokenId, error: expect.stringContaining('commit refused') }),
+        expect.objectContaining({ transactionId: brokenId, errorClass: 'DatabaseError', errorCode: 'P0001' }),
       );
     } finally {
       await query(orm, 'drop trigger if exists test_refuse_commit on wager_transactions');

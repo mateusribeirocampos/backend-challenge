@@ -31,6 +31,7 @@ Em três frases: toda operação roda numa única transação SQL que grava prim
 | MikroORM 7 com `defineEntity` fora do domínio; escritas imediatas na ordem das FKs | fronteira transacional explícita; domínio sem ORM; ordem visível no caso de uso | decorators nas entidades; `flush` da Unit of Work | `src/infrastructure/persistence` |
 | Migrations escritas à mão, com `up` e `down` e teste de reversibilidade | CHECK, índice parcial e trigger não cabem no mapeamento | geração por diff | `test/integration/support/migration-reversibility.ts` |
 | MiniStack no lugar do LocalStack | a imagem do LocalStack exige token pago; o enunciado aceita os dois | LocalStack | `docker-compose.yml` |
+| Erro inesperado registrado só por classe, SQLSTATE e constraint | a mensagem do driver carrega o SQL com parâmetros (valores) | truncar a mensagem (o valor continua lá) | `src/application/error-summary.ts` |
 | Autenticação como ponto de extensão (guard no-op) | não vale pontos; o tempo foi para o obrigatório | Keycloak (desenho na seção 6) | `src/interfaces/http/provider-auth.guard.ts` |
 
 ## 2. Fluxo de uma transação
@@ -92,6 +93,12 @@ Camadas: `domain` (regras puras, só `decimal.js`) ← `application` (casos de u
 - Worker de `PENDING_REFERENCE` em toda instância: confere na hora e depois de 1, 2, 4 s... até 60 s, com jitter; na 15ª conferência com a referência inexistente, `REJECTED` com `REFERENCE_NOT_FOUND` e `WagerTransactionRejected`. Uma linha que falha, também no COMMIT, é pulada no lote e não trava as outras.
 - Prova: `test/integration/messaging`, com filas próprias por teste, processo filho morto com `SIGKILL` entre o commit e o ack e entre o claim e o envio, e `SIGTERM` no `src/main.ts` real.
 
+### Observabilidade
+- Logs JSON, uma linha por evento, com `correlationId`, `messageId`, `transactionId`, `walletId` e `providerId` onde existem (HTTP, consumer, publisher, worker). Nenhum valor monetário nem payload.
+- Erro inesperado vira classe, código (SQLSTATE) e constraint, nos logs, no `500` e no atributo `detail` da DLQ. A mensagem do driver traz o SQL com os parâmetros e a linha recusada, valores incluídos (`src/application/error-summary.ts`).
+- `GET /metrics` (aberto, como o health) no formato texto do Prometheus, gerado à mão a partir dos contadores em memória: transações por status (`wager_http_transactions_total`, `wager_messages_processed_total`), duplicatas por camada e origem, retries, DLQ, conflitos de lock, `wager_outbox_lag_seconds` e o histograma `wager_processing_duration_seconds{source}`, com buckets de 5 ms a 5 s (uma transação leva milissegundos; quem esperou o `lock_timeout` de 2 s cai entre 1 e 2,5 s).
+- Prova: `test/integration/observability` (métricas depois de operações HTTP; erro real do PostgreSQL com um valor marcador que não aparece em log, corpo nem DLQ).
+
 ## 4. Testes obrigatórios (seção 13)
 
 | Item | Status | Onde |
@@ -144,9 +151,10 @@ Autenticação: `ProviderAuthGuard` chama a porta `ProviderIdentityPort`, hoje u
 
 ## 7. Limitações
 
-- Se o SQS recusasse para sempre um evento, a wallet dele pararia de publicar (as outras seguem). Isso aparece nos logs `outbox.publish_failed` e `outbox.wallet_stalled` (a partir de 10 tentativas); as métricas ainda ficam só em memória.
+- Se o SQS recusasse para sempre um evento, a wallet dele pararia de publicar (as outras seguem). Isso aparece nos logs `outbox.publish_failed` e `outbox.wallet_stalled` (a partir de 10 tentativas) e em `wager_outbox_lag_seconds`.
 - Os eventos gerados pelo worker de `PENDING_REFERENCE` usam o id da transação como `correlationId`: o da requisição original não é gravado.
 - Nenhuma transação é gravada como `FAILED`: gravar exigiria uma segunda transação depois do rollback e congelaria a chave num possível bug. A DLQ, com o motivo, é o registro auditável.
-- O reprocessamento da DLQ é manual (README). As métricas ficam em memória e ainda não são expostas.
+- O reprocessamento da DLQ é manual (README). `wager_messages_dead_lettered_total` conta só o que o consumer envia; o que a redrive policy move aparece na profundidade da DLQ no SQS.
+- As métricas são por instância e voltam a zero no restart: o Prometheus soma as instâncias e trata o reinício do contador.
 - A tabela ISO 4217 vem dos dados ICU do runtime e pode mudar com a versão (a CI fixa o Bun). Em produção seria um catálogo próprio.
 - Reverter uma migration não recupera dados. A configuração local usa credenciais fictícias do emulador.

@@ -1,5 +1,6 @@
 import { setTimeout as sleep } from 'node:timers/promises';
 import { type Message, ReceiveMessageCommand, type SQSClient } from '@aws-sdk/client-sqs';
+import { summarizeError } from '../../application/error-summary.js';
 import { type Metrics, MetricName } from '../../application/ports/metrics.js';
 import type { StructuredLogger } from '../../application/ports/structured-logger.js';
 import { type RetryBackoffPolicy, retryDelaySeconds } from './retry-backoff.js';
@@ -129,7 +130,7 @@ export class SqsWagerConsumer {
       return messages;
     } catch (error) {
       this.metrics.increment(MetricName.ConsumerSqsErrors, { operation: 'receive' });
-      this.logger.warn('wager_consumer.receive_failed', { error: describeError(error) });
+      this.logger.warn('wager_consumer.receive_failed', summarizeError(error));
       return undefined;
     }
   }
@@ -234,7 +235,7 @@ export class SqsWagerConsumer {
       this.logger.warn('wager_consumer.sqs_call_failed', {
         operation,
         sqsMessageId: message.sqsMessageId,
-        error: describeError(error),
+        ...summarizeError(error),
       });
       return false;
     }
@@ -282,8 +283,4 @@ async function settlesWithin(work: Promise<void>, timeoutMs: number): Promise<bo
   const drained = await Promise.race([work.then(() => true), timedOut]);
   timer.abort();
   return drained;
-}
-
-function describeError(error: unknown): string {
-  return error instanceof Error ? `${error.name}: ${error.message}`.slice(0, 256) : String(error);
 }

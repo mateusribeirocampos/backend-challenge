@@ -1,3 +1,4 @@
+import { summarizeError } from '../../application/error-summary.js';
 import { type Metrics, MetricName } from '../../application/ports/metrics.js';
 import type { LogFields, StructuredLogger } from '../../application/ports/structured-logger.js';
 import { type ContentionRetryPolicy, DEFAULT_CONTENTION_RETRY, retryOnContention } from '../../application/retry-on-contention.js';
@@ -62,18 +63,31 @@ export class WagerMessageHandler implements MessageHandler {
       // the message back to the queue (which would also send back the rest of the wallet's
       // batch and raise their receive counts). Each attempt is a whole transaction, rolled
       // back entirely when it fails, so running it again is safe.
-      const result = await retryOnContention(
-        () => this.useCase.executeDelivery(command, delivery),
-        this.contentionRetry,
-        (attempt, delayMs) => {
-          this.metrics.increment(MetricName.LockConflicts, { source: 'sqs' });
-          this.logger.warn('wager_message.contention_retry', { ...fields, attempt, delayMs });
-        },
+      const result = await this.timed(() =>
+        retryOnContention(
+          () => this.useCase.executeDelivery(command, delivery),
+          this.contentionRetry,
+          (attempt, delayMs) => {
+            this.metrics.increment(MetricName.LockConflicts, { source: 'sqs' });
+            this.logger.warn('wager_message.contention_retry', { ...fields, attempt, delayMs });
+          },
+        ),
       );
       // The transaction committed (or nothing had to be written): only now can SQS forget it.
       return this.acknowledge(fields, result);
     } catch (error) {
-      return this.onFailure(fields, classifyProcessingFailure(error));
+      // Class, code and constraint only: the error message may carry SQL parameters (spec 12).
+      return this.onFailure({ ...fields, ...summarizeError(error) }, classifyProcessingFailure(error));
+    }
+  }
+
+  /** Latency of the use case (spec 12), in-process lock retries and failures included. */
+  private async timed<T>(work: () => Promise<T>): Promise<T> {
+    const startedAt = performance.now();
+    try {
+      return await work();
+    } finally {
+      this.metrics.observe(MetricName.ProcessingDuration, (performance.now() - startedAt) / 1000, { source: 'sqs' });
     }
   }
 
@@ -82,12 +96,12 @@ export class WagerMessageHandler implements MessageHandler {
     const outcome = { ...fields, transactionId: result.transactionId, status: result.status, failureCode: result.failureCode };
     if (delivery.duplicateMessage) {
       // Layer 1: the same message again (redelivery, or a crash between commit and ack).
-      this.metrics.increment(MetricName.DuplicatesDetected, { layer: 'inbox' });
+      this.metrics.increment(MetricName.DuplicatesDetected, { layer: 'inbox', source: 'sqs' });
       this.logger.info('wager_message.duplicate', { ...outcome, layer: 'inbox' });
     } else if (result.idempotentReplay) {
       // Layer 2: a new message for an operation that already exists (HTTP first, or a
       // producer that sent the operation twice with two messageIds).
-      this.metrics.increment(MetricName.DuplicatesDetected, { layer: 'idempotency_key' });
+      this.metrics.increment(MetricName.DuplicatesDetected, { layer: 'idempotency_key', source: 'sqs' });
       this.logger.info('wager_message.duplicate', { ...outcome, layer: 'idempotency_key' });
     } else {
       this.metrics.increment(MetricName.MessagesProcessed, { status: result.status });

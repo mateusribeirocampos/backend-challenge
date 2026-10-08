@@ -37,6 +37,7 @@ Os testes de integração usam o PostgreSQL e o SQS reais dos containers. Nenhum
 bun run start
 curl -i localhost:3000/health/live
 curl -i localhost:3000/health/ready
+curl -s localhost:3000/metrics      # métricas no formato do Prometheus
 
 # abre uma wallet com 100,00 (guarde o "id" da resposta)
 curl -i -X POST localhost:3000/wallets -H 'content-type: application/json' \
@@ -209,6 +210,8 @@ Tabela completa, requisito por requisito, com o teste que prova cada um. O resum
 | Reconciliação: divergência logada, contada e sinalizada, nunca corrigida | `bun test test/integration/wagering/reconciliation.test.ts test/unit/domain/wallet/wallet-reconciliation.test.ts` | `src/application/wallets/reconcile-wallet.ts`, `src/domain/wallet/wallet-reconciliation.ts` |
 | Três processos reais (`src/main.ts`) ao mesmo tempo, com HTTP em round-robin e SQS: wallet disputada (30 apostas de 10,00 contra 100,00, exatamente 10 débitos), a mesma aposta em três instâncias e dois canais, pares REFUND/ROLLBACK, REFUND antes da BET; no fim saldo igual ao ledger, nunca negativo, um efeito por operação, filas vazias, todo evento publicado | `bun test test/integration/multi-instance/three-instances.test.ts` | `test/integration/multi-instance/support/cluster.ts` |
 | Instância morta com `SIGKILL` segurando uma mensagem SQS e uma requisição HTTP: reenvio com a mesma chave, redelivery para outra instância, processo substituto; depois `SIGTERM` em todas e processos novos terminam a mensagem, a referência pendente e a outbox deixadas para trás | `bun test test/integration/multi-instance/restart.test.ts` | `src/interfaces/messaging/sqs-wager-consumer.ts`, `src/application/wagering/resolve-pending-references.ts`, `src/application/outbox/publish-outbox.ts` |
+| Métricas no formato do Prometheus em `GET /metrics`: transações por status, duplicatas, retries, DLQ, conflitos de lock, outbox lag e histograma de latência por origem (HTTP, SQS) | `bun test test/integration/observability/metrics-endpoint.test.ts test/unit/infrastructure/observability` | `src/infrastructure/observability/prometheus-text.ts`, `src/infrastructure/observability/in-memory-metrics.ts` |
+| Logs JSON com `correlationId`, `messageId`, `transactionId`, `walletId`, `providerId`, sem valores; erro inesperado só por classe, SQLSTATE e constraint nos logs, no `500` e na DLQ | `bun test test/integration/observability/error-sanitization.test.ts test/unit/application/error-summary.test.ts` | `src/application/error-summary.ts`, `src/interfaces/http/api-exception.filter.ts`, `src/interfaces/messaging/processing-failure.ts` |
 
 </details>
 

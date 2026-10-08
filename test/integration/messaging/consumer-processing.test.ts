@@ -101,7 +101,7 @@ describe('SQS consumer: processing, deduplication and DLQ (spec 10, ADR-005)', (
     await sendWagerMessage(sqs, queues.url, message, { deduplicationId: randomUUID() });
 
     await waitUntil('both copies are deleted', async () =>
-      (await isEmpty(sqs, queues.url)) && app.metrics.value(MetricName.DuplicatesDetected, { layer: 'inbox' }) === 1,
+      (await isEmpty(sqs, queues.url)) && app.metrics.value(MetricName.DuplicatesDetected, { layer: 'inbox', source: 'sqs' }) === 1,
     );
     expect(await countRows(orm, 'wallet_ledger_entries', `wallet_id = '${wallet.id}'`)).toBe(2); // OPENING + one DEBIT
     expect(await inboxRows(orm, message.messageId)).toHaveLength(1);
@@ -134,7 +134,7 @@ describe('SQS consumer: processing, deduplication and DLQ (spec 10, ADR-005)', (
     }
 
     await waitUntil('both copies are deleted', async () =>
-      (await isEmpty(sqs, queues.url)) && app.metrics.value(MetricName.DuplicatesDetected, { layer: 'inbox' }) === 1,
+      (await isEmpty(sqs, queues.url)) && app.metrics.value(MetricName.DuplicatesDetected, { layer: 'inbox', source: 'sqs' }) === 1,
     );
     expect(await countRows(orm, 'wallet_ledger_entries', `wallet_id = '${wallet.id}'`)).toBe(2);
     await expectBalanceMatchesLedger(orm, app.baseUrl, wallet.id, '75.00');
@@ -149,7 +149,7 @@ describe('SQS consumer: processing, deduplication and DLQ (spec 10, ADR-005)', (
     await sendWagerMessage(sqs, queues.url, message);
 
     await waitUntil('the message is acked', () => isEmpty(sqs, queues.url));
-    expect(app.metrics.value(MetricName.DuplicatesDetected, { layer: 'idempotency_key' })).toBe(1);
+    expect(app.metrics.value(MetricName.DuplicatesDetected, { layer: 'idempotency_key', source: 'sqs' })).toBe(1);
     expect(app.metrics.value(MetricName.MessagesProcessed, { status: 'PROCESSED' })).toBe(0);
     // The message is recorded as handled, even though the operation came from HTTP.
     expect(await inboxRows(orm, message.messageId)).toHaveLength(1);
