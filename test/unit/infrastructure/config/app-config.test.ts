@@ -34,6 +34,8 @@ describe('loadConfig', () => {
       user: 'wagering',
       password: 'wagering',
       dbName: 'wagering',
+      poolSize: 10,
+      acquireTimeoutMs: 2_000,
     });
     expect(config.sqs).toEqual({
       region: 'us-east-1',
@@ -133,6 +135,29 @@ describe('loadConfig', () => {
 
   test('error message lists the problems so the startup log is self explanatory', () => {
     expect(() => loadConfig({})).toThrow(/Invalid environment configuration:\n {2}- DATABASE_HOST: is required/);
+  });
+
+  test('reads the connection pool settings', () => {
+    const config = loadConfig({
+      ...validEnv,
+      DATABASE_POOL_SIZE: '4',
+      DATABASE_POOL_ACQUIRE_TIMEOUT_MS: '500',
+    });
+
+    expect(config.database).toMatchObject({ poolSize: 4, acquireTimeoutMs: 500 });
+  });
+
+  test('refuses an empty pool and an acquisition timeout of zero (it would mean "wait forever")', () => {
+    expect(
+      problemsFor({
+        ...validEnv,
+        DATABASE_POOL_SIZE: '0',
+        DATABASE_POOL_ACQUIRE_TIMEOUT_MS: '0',
+      }),
+    ).toEqual([
+      'DATABASE_POOL_SIZE: must be an integer between 1 and 100',
+      'DATABASE_POOL_ACQUIRE_TIMEOUT_MS: must be an integer between 100 and 60000',
+    ]);
   });
 
   test('rejects a port out of range', () => {

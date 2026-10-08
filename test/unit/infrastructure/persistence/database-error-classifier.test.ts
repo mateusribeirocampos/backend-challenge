@@ -3,6 +3,7 @@ import {
   CheckConstraintViolationException,
   ConnectionException,
   DeadlockException,
+  DriverException,
   UniqueConstraintViolationException,
 } from '@mikro-orm/core';
 import {
@@ -60,6 +61,16 @@ describe('isTransientDatabaseError: "retry with the same key" vs "do not retry"'
     expect(isTransientDatabaseError(new Error('Connection terminated unexpectedly'))).toBe(true);
   });
 
+  test('no free connection in the pool within the acquisition timeout is transient (HTTP 503, SQS retry with backoff)', () => {
+    // Exactly what pg-pool raises when connectionTimeoutMillis expires: a plain Error with
+    // no code. em.transactional lets it through as is; em.execute wraps it in a DriverException.
+    const poolTimeout = new Error('timeout exceeded when trying to connect');
+    expect(isTransientDatabaseError(poolTimeout)).toBe(true);
+    expect(isTransientDatabaseError(new DriverException(poolTimeout))).toBe(true);
+    // The same timeout while opening a NEW connection to the database.
+    expect(isTransientDatabaseError(new Error('Connection terminated due to connection timeout'))).toBe(true);
+  });
+
   test('anything else is not: a plain bug must not be retried forever', () => {
     expect(isTransientDatabaseError(new TypeError('x is undefined'))).toBe(false);
     expect(isTransientDatabaseError('a string')).toBe(false);
@@ -92,6 +103,8 @@ describe('isLockContentionError: transient AND worth retrying right away, in the
 
   test('a connection error without code is not contention', () => {
     expect(isLockContentionError(new ConnectionException(driverError('XX000')))).toBe(false);
+    // An exhausted pool means overload: retrying in milliseconds in the same process only adds to it.
+    expect(isLockContentionError(new Error('timeout exceeded when trying to connect'))).toBe(false);
     expect(isLockContentionError(new Error('Connection terminated unexpectedly'))).toBe(false);
   });
 });

@@ -19,6 +19,13 @@ export function buildMikroOrmConfig(database: DatabaseConfig): Options {
     password: database.password,
     dbName: database.dbName,
 
+    pool: { max: database.poolSize },
+    // Passed to pg's Pool. connectionTimeoutMillis bounds the wait for a free connection
+    // (and the opening of a new one). Past it pg raises "timeout exceeded when trying to
+    // connect", classified as transient: HTTP 503 + Retry-After, SQS retry with backoff.
+    // Unset, pg waits forever: under overload the latency would grow with no limit.
+    driverOptions: { connectionTimeoutMillis: database.acquireTimeoutMs },
+
     // Entities are listed explicitly (defineEntity schemas, outside the domain).
     // No folder discovery and no metadata provider, so nothing depends on how
     // Bun emits decorator metadata.

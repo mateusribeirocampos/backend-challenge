@@ -22,6 +22,13 @@ export interface DatabaseConfig {
   readonly user: string;
   readonly password: string;
   readonly dbName: string;
+  /** Connections of the main pool: HTTP requests and the SQS consumer. */
+  readonly poolSize: number;
+  /**
+   * How long a caller waits for a free connection (or for a new one to open) before
+   * failing as transient. Without it, a full pool makes every caller wait with no limit.
+   */
+  readonly acquireTimeoutMs: number;
 }
 
 export interface SqsConfig {
@@ -135,6 +142,8 @@ const envSchema = z
     DATABASE_USER: requiredText,
     DATABASE_PASSWORD: requiredText,
     DATABASE_NAME: requiredText,
+    DATABASE_POOL_SIZE: integerBetween(1, 100).default(10),
+    DATABASE_POOL_ACQUIRE_TIMEOUT_MS: integerBetween(100, 60_000).default(2_000),
     AWS_REGION: requiredText,
     AWS_ACCESS_KEY_ID: z.string().trim().min(1).optional(),
     AWS_SECRET_ACCESS_KEY: z.string().trim().min(1).optional(),
@@ -199,6 +208,8 @@ export function loadConfig(rawEnv: RawEnv): AppConfig {
       user: env.DATABASE_USER,
       password: env.DATABASE_PASSWORD,
       dbName: env.DATABASE_NAME,
+      poolSize: env.DATABASE_POOL_SIZE,
+      acquireTimeoutMs: env.DATABASE_POOL_ACQUIRE_TIMEOUT_MS,
     },
     sqs: {
       region: env.AWS_REGION,

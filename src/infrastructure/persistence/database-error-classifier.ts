@@ -39,7 +39,12 @@ const TRANSIENT_NETWORK_CODES = new Set([
   'ENOTFOUND',
 ]);
 
-/** pg raises these without a code when the connection drops in the middle of a query. */
+/**
+ * pg raises these without a code. 'Connection terminated': the connection dropped in the
+ * middle of a query, or (with "due to connection timeout") a new one did not open in time.
+ * 'timeout exceeded when trying to connect': no free connection in the pool within
+ * DATABASE_POOL_ACQUIRE_TIMEOUT_MS (overload). Both can pass on their own, so: transient.
+ */
 const CONNECTION_LOST_MESSAGES = ['Connection terminated', 'connection timeout', 'timeout exceeded when trying to connect'];
 
 /**
