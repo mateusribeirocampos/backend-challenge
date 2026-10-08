@@ -108,6 +108,14 @@ describe('renderReport', () => {
     expect(report).toContain('passos de 1, 8, 64 clientes, 6 s medidos por passo');
   });
 
+  test('the header says which command wrote the file: one run by default, or what the caller tells', () => {
+    const single = renderReport(run([scenario('distinct-wallets', [step()])]));
+    const summary = renderReport(run([scenario('distinct-wallets', [step()])]), '`bun run test:load:summary` a partir de 3 execuções');
+
+    expect(single).toContain('> Gerado por `bun run test:load` em ');
+    expect(summary).toContain('> Gerado por `bun run test:load:summary` a partir de 3 execuções.');
+  });
+
   test('one row per step, numbers in Brazilian notation as measured', () => {
     const report = renderReport(run([scenario('distinct-wallets', [step()])]));
 
