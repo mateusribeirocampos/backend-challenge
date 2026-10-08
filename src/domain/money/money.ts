@@ -18,6 +18,13 @@ export const MONEY_SCALE = 2;
  */
 const AMOUNT_PATTERN = /^(0|[1-9]\d{0,17})(\.\d{1,2})?$/;
 
+/**
+ * The same shape for a SUM of ledger entries, which can pass 18 integer digits even
+ * when every entry and the balance fit numeric(20,2). Up to 38 integer digits: with
+ * 2 decimals that is the 40 significant digits MoneyDecimal keeps exactly.
+ */
+const LEDGER_TOTAL_PATTERN = /^(0|[1-9]\d{0,37})(\.\d{1,2})?$/;
+
 /** Three uppercase letters, the shape of an ISO-4217 code (BRL, USD). */
 const CURRENCY_PATTERN = /^[A-Z]{3}$/;
 /**
@@ -64,10 +71,22 @@ export class Money {
 
   /** Parses a contract or database value. Rejects anything that is not "123" / "123.4" / "123.45". */
   static from(props: MoneyProps): Money {
+    return Money.parse(props, AMOUNT_PATTERN);
+  }
+
+  /**
+   * A total of ledger entries read from the database (reconciliation). Never a value
+   * from outside: contract input and stored amounts keep going through Money.from.
+   */
+  static fromLedgerTotal(props: MoneyProps): Money {
+    return Money.parse(props, LEDGER_TOTAL_PATTERN);
+  }
+
+  private static parse(props: MoneyProps, pattern: RegExp): Money {
     const currency = Money.parseCurrency(props.currency);
     // A number can still arrive here at runtime (JSON body, any cast). Refuse it
     // instead of converting: 0.1 as a number is already not 0.10.
-    if (typeof props.amount !== 'string' || !AMOUNT_PATTERN.test(props.amount)) {
+    if (typeof props.amount !== 'string' || !pattern.test(props.amount)) {
       // The value is not echoed: this text reaches logs and DLQ attributes (spec 12).
       throw new InvalidMoneyError(
         `Invalid amount: expected a non-negative decimal string with at most ${MONEY_SCALE} decimals`,

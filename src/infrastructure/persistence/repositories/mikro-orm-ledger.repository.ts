@@ -46,11 +46,13 @@ export class MikroOrmLedgerRepository implements LedgerRepository {
     if (row === undefined) {
       return undefined;
     }
-    const money = (amount: string) => Money.from({ amount, currency: row.currency });
+    // The sums can pass 18 integer digits (a wallet that moved more than one balance can
+    // hold over its life), so they are read as totals; the stored balance is one amount.
+    const total = (amount: string) => Money.fromLedgerTotal({ amount, currency: row.currency });
     return {
-      storedBalance: money(row.stored),
-      totalCredits: money(row.credits),
-      totalDebits: money(row.debits),
+      storedBalance: Money.from({ amount: row.stored, currency: row.currency }),
+      totalCredits: total(row.credits),
+      totalDebits: total(row.debits),
       entries: row.entries,
     };
   }
