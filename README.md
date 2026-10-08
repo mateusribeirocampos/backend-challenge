@@ -9,7 +9,7 @@ As decisões técnicas, os trade-offs e as limitações estão em [ARCHITECTURE.
 
 - Bun 1.x (`curl -fsSL https://bun.sh/install | bash`)
 - Docker com Docker Compose v2
-- Portas livres no host: 5432 (PostgreSQL) e 4566 (SQS)
+- Portas livres no host: 5432 (PostgreSQL) e 4566 (SQS). Um PostgreSQL instalado na máquina e já rodando ocupa a 5432, e o `docker compose up` falha com `address already in use`
 
 ## Como executar a aplicação
 
