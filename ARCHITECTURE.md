@@ -14,6 +14,8 @@ Em três frases: toda operação roda numa única transação SQL que grava prim
 | Regras de negócio numa função pura | testável sem banco; a aplicação busca, trava e grava | regras espalhadas no caso de uso | `src/domain/wager/apply-wager-transaction.ts` |
 | Lock pessimista por wallet com `FOR NO KEY UPDATE` | a FK do insert pega `KEY SHARE` na wallet; `FOR UPDATE` causava deadlock entre duas apostas | otimista com retry: tempestade de retries numa wallet disputada | `src/infrastructure/persistence/repositories/mikro-orm-wallet.repository.ts` |
 | `READ COMMITTED` + `lock_timeout` de 2 s | depois do lock, lê o saldo commitado; sem limite, requisições acumulam e esgotam o pool | `SERIALIZABLE`: troca espera por erros `40001` | `mikro-orm-transaction-runner.ts` |
+| Espera por conexão no pool limitada a 2 s (`DATABASE_POOL_ACQUIRE_TIMEOUT_MS`), erro transitório | no teste de carga a fila do pool chegou a 2.185 ms sem virar `503`; com prazo, a sobrecarga vira `503` + `Retry-After` | sem prazo (latência sem limite) | `mikro-orm.config.ts`, `connection-pools.test.ts` |
+| Publisher e worker com pool próprio (`DATABASE_BACKGROUND_POOL_SIZE`, 3) | na hot wallet as 10 conexões do pool ficavam no lock e a publicação caía para 4,3 eventos/s | pool único maior: só adia o problema | `src/background-workers.module.ts` |
 | Idempotência por insert-first com `ON CONFLICT DO NOTHING` | a segunda requisição idêntica espera no índice e lê o resultado final; não existe estado "em andamento" | consultar antes de gravar: corrida entre a consulta e o insert | `src/application/wagering/process-wager-transaction.ts` |
 | Resultado original gravado na transação | o replay devolve o saldo daquele momento | recalcular no replay | coluna `result_balance_amount` |
 | Chave de idempotência começa com `{providerId}:` | a chave única é global; sem prefixo, um provedor ocuparia a chave de outro | aceitar qualquer chave | `src/domain/wager/wager-transaction.ts` |
@@ -154,7 +156,7 @@ Autenticação: `ProviderAuthGuard` chama a porta `ProviderIdentityPort`, hoje u
 ## 7. Limitações
 
 - Se o SQS recusasse para sempre um evento, a wallet dele pararia de publicar (as outras seguem). Isso aparece nos logs `outbox.publish_failed` e `outbox.wallet_stalled` (a partir de 10 tentativas) e em `wager_outbox_lag_seconds`.
-- No teste de carga a publicação da outbox (243,5 eventos/s) não acompanha a escrita saturada (1.970,0/s), e na hot wallet o publisher fica sem conexão porque divide o pool com o HTTP. Próximos passos: pool próprio para os loops de fundo, `SendMessageBatch`, marcação em lote e prazo de espera no pool (hoje a fila do pool não vira `503`).
+- No teste de carga a publicação da outbox (243,5 eventos/s) não acompanha a escrita saturada (1.970,0/s). Próximos passos: `SendMessageBatch` e marcação em lote. O relatório é anterior ao pool próprio dos loops e ao prazo do pool, e precisa ser gerado de novo.
 - Os eventos gerados pelo worker de `PENDING_REFERENCE` usam o id da transação como `correlationId`: o da requisição original não é gravado.
 - Nenhuma transação é gravada como `FAILED`: gravar exigiria uma segunda transação depois do rollback e congelaria a chave num possível bug. A DLQ, com o motivo, é o registro auditável.
 - O reprocessamento da DLQ é manual (README). `wager_messages_dead_lettered_total` conta só o que o consumer envia; o que a redrive policy move aparece na profundidade da DLQ no SQS.
