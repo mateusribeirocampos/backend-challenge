@@ -130,9 +130,34 @@ export async function measureStep(context: StepContext, plan: StepPlan): Promise
  */
 async function startOnFreshEventsQueue(context: StepContext): Promise<void> {
   const timeoutMs = context.settings.drainTimeoutSeconds * 1000;
-  await pollUntil(async () => (await unpublishedEvents(context.orm)) === 0, timeoutMs);
-  await pollUntil(async () => context.drainer.received() >= (await totalEvents(context.orm)), timeoutMs);
-  await recreateEventsQueue(context.sqs, context.queues.events);
+  await recreateWhenDrained({
+    outboxEmpty: () => pollUntil(async () => (await unpublishedEvents(context.orm)) === 0, timeoutMs),
+    everyEventReceived: () => pollUntil(async () => context.drainer.received() >= (await totalEvents(context.orm)), timeoutMs),
+    recreate: () => recreateEventsQueue(context.sqs, context.queues.events),
+  });
+}
+
+export interface DrainedQueueSteps {
+  /** true once no event is left unpublished, false when the drain timeout ran out. */
+  readonly outboxEmpty: () => Promise<boolean>;
+  /** true once every published event was read from the events queue, false on timeout. */
+  readonly everyEventReceived: () => Promise<boolean>;
+  readonly recreate: () => Promise<void>;
+}
+
+/**
+ * Recreates the events queue only after both waits succeeded. A wait that timed out
+ * fails the step instead: deleting the queue then would throw away events not read yet,
+ * and the next step would not start from the conditions the report describes.
+ */
+export async function recreateWhenDrained(steps: DrainedQueueSteps): Promise<void> {
+  if (!(await steps.outboxEmpty())) {
+    throw new Error('the outbox did not drain within LOAD_DRAIN_TIMEOUT_SECONDS: events queue kept, step aborted');
+  }
+  if (!(await steps.everyEventReceived())) {
+    throw new Error('published events were not all received within LOAD_DRAIN_TIMEOUT_SECONDS: events queue kept, step aborted');
+  }
+  await steps.recreate();
 }
 
 /** p50/p95/p99 in ms estimated from the HTTP histogram buckets observed in the window. */

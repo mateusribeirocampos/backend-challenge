@@ -23,6 +23,19 @@ const clientSteps = z
   })
   .default([1, 8, 64]);
 
+/** A SQL identifier ending in _load: the only kind of database a load run may drop. */
+const DISPOSABLE_DATABASE = /^[a-z_][a-z0-9_]*_load$/;
+
+/**
+ * Checked again right before DROP DATABASE, so no caller can skip it: the name must end
+ * in _load and must not be the database the application itself is configured to use.
+ */
+export function assertDisposableLoadDatabase(databaseName: string, applicationDatabase: string): void {
+  if (!DISPOSABLE_DATABASE.test(databaseName) || databaseName === applicationDatabase) {
+    throw new Error(`refusing to drop database "${databaseName}": a load run only drops its own *_load database`);
+  }
+}
+
 const schema = z.object({
   LOAD_INSTANCES: positiveInt(3),
   LOAD_WARMUP_SECONDS: positiveInt(2),
@@ -35,7 +48,11 @@ const schema = z.object({
   LOAD_MIXED_SQS_ROUNDS: positiveInt(10),
   LOAD_DRAIN_TIMEOUT_SECONDS: positiveInt(120),
   // A database of its own, dropped and recreated on every run: wagering_test belongs to bun test.
-  LOAD_DATABASE_NAME: z.string().regex(/^[a-z_][a-z0-9_]*$/).default('wagering_load'),
+  // The _load suffix is the promise that it holds nothing else.
+  LOAD_DATABASE_NAME: z
+    .string()
+    .regex(DISPOSABLE_DATABASE, 'must end in _load: the load run drops this database')
+    .default('wagering_load'),
   LOAD_REPORT_PATH: z.string().min(1).default('docs/teste-de-carga.md'),
 });
 

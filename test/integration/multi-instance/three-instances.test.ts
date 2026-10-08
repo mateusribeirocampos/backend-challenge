@@ -75,6 +75,7 @@ describe('three instances at the same time (spec 13 item 4)', () => {
     const sameBet = await openWallet(urlOf(1), '100.00');
     const reversals = await openWallet(urlOf(2), '100.00');
     const outOfOrder = await openWallet(urlOf(0), '100.00');
+    const twoBetsOf80 = await openWallet(urlOf(2), '100.00');
     const distinct: OpenedWallet[] = [];
     for (let index = 0; index < 6; index += 1) {
       distinct.push(await openWallet(urlOf(index), '100.00'));
@@ -118,7 +119,7 @@ describe('three instances at the same time (spec 13 item 4)', () => {
     const outOfOrderPair = betAndReversal(outOfOrder, 'REFUND');
     let outOfOrderBetMessage: WagerEnvelope | undefined;
 
-    const [hotAnswers, sameBetAnswers, , , refundBeforeBet] = await Promise.all([
+    const [hotAnswers, sameBetAnswers, , , refundBeforeBet, betsOf80] = await Promise.all([
       Promise.all(hotBets.map((body, index) => submitUntilAnswered(all, index, body))),
       Promise.all(Array.from({ length: 6 }, (_, index) => submitUntilAnswered(all, index, theSameBet))),
       Promise.all(
@@ -139,9 +140,11 @@ describe('three instances at the same time (spec 13 item 4)', () => {
         await send(outOfOrderBetMessage);
         return answer;
       })(),
+      // Spec 8, literally: two BETs of 80.00 on a wallet of 100.00, one on instance 1 and one on instance 2.
+      Promise.all([0, 1].map((index) => submitUntilAnswered(all, index, wager(twoBetsOf80, { money: BRL('80.00') })))),
     ]);
 
-    const wallets = [hot, sameBet, reversals, outOfOrder, ...distinct];
+    const wallets = [hot, sameBet, reversals, outOfOrder, twoBetsOf80, ...distinct];
     await waitUntilSettled(orm, sqs, queues, wallets.map((wallet) => wallet.id));
     console.info('[multi-instance] SQS messages processed per instance:', processedPerInstance(instances));
 
@@ -156,6 +159,12 @@ describe('three instances at the same time (spec 13 item 4)', () => {
     expect(new Set(sameBetAnswers.map((answer) => answer.body.transactionId)).size).toBe(1);
     expect(await outcomesOf(orm, sameBet.id)).toEqual({ 'BET PROCESSED': 1 });
     await expectWalletConsistent(orm, urlOf(2), sameBet.id, '70.00');
+
+    // Spec 8 over two processes: one 201, one 422 INSUFFICIENT_FUNDS, one debit, 20.00 left.
+    expect(betsOf80.map((answer) => answer.status).sort()).toEqual([201, 422]);
+    expect(betsOf80.find((answer) => answer.status === 422)?.body.failureCode).toBe('INSUFFICIENT_FUNDS');
+    expect(await outcomesOf(orm, twoBetsOf80.id)).toEqual({ 'BET PROCESSED': 1, 'BET REJECTED': 1 });
+    await expectWalletConsistent(orm, urlOf(0), twoBetsOf80.id, '20.00');
 
     for (const wallet of distinct) {
       expect(await outcomesOf(orm, wallet.id)).toEqual({ 'BET PROCESSED': 4 });

@@ -62,6 +62,7 @@ Camadas: `domain` (regras puras, só `decimal.js`) ← `application` (casos de u
 - `Money` imutável, escala fixa de duas casas, sem arredondamento: mais de duas casas é recusado. Moedas diferentes lançam erro. Até 18 dígitos inteiros, o limite da coluna `numeric(20,2)`, que volta do driver como string.
 - `BET` debita (`INSUFFICIENT_FUNDS`); `WIN` e `REFUND` creditam; `LOSS` não move saldo; `ROLLBACK` inverte a referência (`REVERSAL_WOULD_OVERDRAW` quando faltaria saldo, distinto do anterior).
 - A referência precisa ser do mesmo provider, player, wallet, moeda e rodada, e de mesmo valor. Interpretações na seção 5.
+- Estados: `PENDING` vai para `PROCESSED`, `REJECTED` ou `PENDING_REFERENCE`; `PENDING_REFERENCE` vai para `PROCESSED` ou `REJECTED`; os terminais não mudam mais (`FAILED` existe no modelo, mas não é gravado, ver seção 7). A tabela está em `ALLOWED_TRANSITIONS` (`wager-transaction-status.ts`) e de novo no trigger `wager_transactions_guard`, que recusa qualquer outra transição.
 - Um teste falha se `parseFloat`, `Number(` ou `Math.round(` aparecerem no domínio (`test/unit/domain/no-number-for-money.test.ts`).
 - O PostgreSQL aceita `NaN` em `numeric` e o trata como maior que qualquer número, então `>= 0` não o barra. Toda coluna monetária tem `CHECK (coluna <> 'NaN')` (migration `monetary_not_nan`).
 
@@ -83,7 +84,7 @@ Camadas: `domain` (regras puras, só `decimal.js`) ← `application` (casos de u
 - `wallet.debit()` e `wallet.credit()` devolvem o lançamento que produzem; não há como mudar o saldo sem ledger.
 - No banco, cada lançamento guarda `wallet_version` e começa onde o anterior terminou (trigger de cadeia, `UNIQUE (wallet_id, wallet_version)`). No COMMIT, constraint triggers diferidas exigem saldo e versão iguais aos do último lançamento. Ledger e transação terminal são imutáveis (triggers).
 - O que fica só no domínio, por escolha: direção do lançamento por tipo e lançamento apenas de transação processada. Levar isso ao banco duplicaria a regra em PL/pgSQL.
-- `POST /wallets/:id/reconciliation` compara saldo e créditos menos débitos numa só instrução (um snapshot, sem lock). Divergência: log `wallet.reconciliation_divergence`, métrica e `consistent: false`; nada é corrigido. `GET /wallets/:id/ledger` pagina por cursor de `wallet_version`.
+- `POST /wallets/:id/reconciliation` compara saldo e créditos menos débitos numa só instrução (um snapshot, sem lock). Divergência: log `wallet.reconciliation_divergence`, métrica e `consistent: false`; nada é corrigido. As somas são lidas com `Money.fromLedgerTotal`, sem o limite de 18 dígitos de um valor: a wallet pode movimentar na vida mais do que um saldo comporta. `GET /wallets/:id/ledger` pagina por cursor de `wallet_version`.
 - Prova: `test/integration/schema` tenta violar cada garantia com SQL direto; todo teste que movimenta uma wallet termina com saldo igual ao ledger reconstruído; `reconciliation.test.ts` corrompe o saldo com os triggers desligados só naquela sessão.
 
 ### Processamento assíncrono e recuperação de falhas
@@ -100,7 +101,7 @@ Camadas: `domain` (regras puras, só `decimal.js`) ← `application` (casos de u
 ### Observabilidade
 - Logs JSON, uma linha por evento, com `correlationId`, `messageId`, `transactionId`, `walletId` e `providerId` onde existem (HTTP, consumer, publisher, worker). Nenhum valor monetário nem payload.
 - Erro inesperado vira classe, código (SQLSTATE) e constraint, nos logs, no `500` e no atributo `detail` da DLQ. A mensagem do driver traz o SQL com os parâmetros e a linha recusada, valores incluídos (`src/application/error-summary.ts`).
-- `GET /metrics` (aberto, como o health) no formato texto do Prometheus, gerado à mão a partir dos contadores em memória: transações por status (`wager_http_transactions_total`, `wager_messages_processed_total`), duplicatas por camada e origem, retries, DLQ, conflitos de lock, `wager_outbox_lag_seconds` e o histograma `wager_processing_duration_seconds{source}`, com buckets de 5 ms a 5 s (uma transação leva milissegundos; quem esperou o `lock_timeout` de 2 s cai entre 1 e 2,5 s).
+- `GET /metrics` (aberto, como o health) no formato texto do Prometheus, gerado à mão a partir dos contadores em memória: transações por status (`wager_http_transactions_total`, `wager_messages_processed_total`), duplicatas por camada e origem, retries, DLQ, conflitos de lock, `wager_outbox_lag_seconds` e os histogramas `wager_processing_duration_seconds{source}`, com buckets de 5 ms a 5 s (uma transação leva milissegundos; quem esperou o `lock_timeout` de 2 s cai entre 1 e 2,5 s) e `wager_wallet_lock_wait_seconds`. `wager_lock_conflicts_total` conta só o lock perdido (`55P03`, `40P01`, `40001`); a espera que termina bem, como a segunda aposta de 80 na fila da primeira, aparece no histograma de espera.
 - Prova: `test/integration/observability` (métricas depois de operações HTTP; erro real do PostgreSQL com um valor marcador que não aparece em log, corpo nem DLQ).
 
 ## 4. Testes obrigatórios (seção 13)
@@ -135,6 +136,9 @@ Camadas: `domain` (regras puras, só `decimal.js`) ← `application` (casos de u
 | Referência não chega em 15 conferências (~4,5 a 9 min); se existe mas não terminou, a espera continua | `REJECTED` com `REFERENCE_NOT_FOUND` só quando ela não existe | rejeitar cedo perderia um REFUND; um ROLLBACK rejeitado enquanto o seu REFUND credita depois deixaria o crédito sem reversão |
 | Wallet inexistente | HTTP: `404`, nada gravado; SQS: transitório | a wallet pode ser criada pelo HTTP logo depois |
 | Fila de eventos | `wagering-events.fifo` | o enunciado só nomeia a de entrada e a DLQ |
+| `Idempotency-Key` fora de `{providerId}:` | `400 IDEMPOTENCY_KEY_INVALID` (o enunciado recomenda esse formato; aqui é obrigatório) | a chave é única global; sem o prefixo um provedor ocuparia a chave de outro |
+| WIN ou LOSS que aponta para uma BET que ainda não chegou | espera em `PENDING_REFERENCE`, como REFUND e ROLLBACK | pagar sem a aposta creditaria algo que talvez nunca existiu |
+| `playerId`, `walletId` e `data.idempotencyKey` (SQS) | UUID nos ids; a chave é obrigatória na mensagem | como nos exemplos do enunciado; sem a chave a mensagem vai para a DLQ |
 
 ## 6. API e autenticação
 
@@ -149,7 +153,18 @@ Camadas: `domain` (regras puras, só `decimal.js`) ← `application` (casos de u
 | não encontrado / corpo grande demais | `404` / `413` |
 | transitório (lock, deadlock, banco fora) | `503` com `Retry-After`: reenviar com a mesma chave |
 
-Erros usam um envelope único `{ errorCode, message, details?, correlationId }`. Respostas de transação não usam o envelope, para o corpo do replay ser idêntico ao original. Os códigos de falha (`failureCode`) estão em `src/domain/wager/failure-code.ts`.
+Erros usam um envelope único `{ errorCode, message, details?, correlationId }`. Respostas de transação não usam o envelope, para o corpo do replay ser idêntico ao original.
+
+O que o provedor faz com cada `failureCode` (`src/domain/wager/failure-code.ts`); a rejeição é gravada, então reenviar devolve a mesma resposta:
+
+| `failureCode` | Ação do provedor |
+|---|---|
+| `INSUFFICIENT_FUNDS`, `REVERSAL_WOULD_OVERDRAW`, `BALANCE_LIMIT_EXCEEDED` | desistir: a regra de saldo não muda com o reenvio |
+| `CURRENCY_MISMATCH`, `WALLET_PLAYER_MISMATCH`, `REFERENCE_INVALID_KIND`, `REFERENCE_MISMATCH`, `AMOUNT_MISMATCH` | corrigir o payload e enviar com **outra** chave |
+| `REFERENCE_NOT_PROCESSED`, `REFERENCE_ALREADY_REVERSED` | desistir: a referência foi rejeitada ou já revertida |
+| `REFERENCE_NOT_FOUND` | enviar a referência e depois a dependente, com outra chave |
+| `400` (`ContractViolationCode` em `details`) | corrigir o payload; nada foi gravado, a mesma chave pode ser usada |
+| `503` | reenviar igual, com a mesma chave |
 
 Autenticação: `ProviderAuthGuard` chama a porta `ProviderIdentityPort`, hoje um adaptador no-op. O desenho previsto: Keycloak com client credentials por provedor, JWT validado pela JWKS, `401` sem token e `403` quando o `providerId` do corpo for diferente do token. Sem isso, um provedor pode se apresentar com o `providerId` de outro.
 

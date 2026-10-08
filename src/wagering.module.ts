@@ -34,8 +34,8 @@ import { APP_CONFIG, type AppConfig } from './infrastructure/config/app-config.j
     { provide: PROVIDER_IDENTITY, useClass: NoopProviderIdentity },
     {
       provide: TRANSACTION_RUNNER,
-      useFactory: (orm: MikroORM): TransactionRunner => new MikroOrmTransactionRunner(orm),
-      inject: [MikroORM],
+      useFactory: (orm: MikroORM, metrics: Metrics): TransactionRunner => new MikroOrmTransactionRunner(orm, metrics),
+      inject: [MikroORM, METRICS],
     },
     {
       provide: OpenWallet,

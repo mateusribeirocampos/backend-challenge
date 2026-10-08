@@ -60,6 +60,27 @@ describe('POST /wallets/:walletId/reconciliation', () => {
     await expectBalanceMatchesLedger(orm, app.baseUrl, wallet.id, '85.00');
   });
 
+  test('lifetime totals past the limit of one amount: each entry and the balance fit numeric(20,2), the sums do not', async () => {
+    const MAX = '999999999999999999.99';
+    const wallet = await openWallet(app.baseUrl, MAX);
+    for (const kind of ['BET', 'WIN', 'BET'] as const) {
+      expect((await submit(app.baseUrl, wager(wallet, { kind, money: { amount: MAX, currency: 'BRL' } }))).status).toBe(201);
+    }
+    // Credits and debits are both 1999999999999999999.98: 19 integer digits.
+
+    const response = await reconcile(wallet.id);
+
+    expect(response.status).toBe(200);
+    expect(response.body).toEqual({
+      walletId: wallet.id,
+      storedBalance: { amount: '0.00', currency: 'BRL' },
+      calculatedBalance: { amount: '0.00', currency: 'BRL' },
+      difference: { amount: '0.00', currency: 'BRL' },
+      consistent: true,
+      checkedEntries: 4,
+    });
+  });
+
   test('a corrupted wallet: flagged with the right difference, logged, counted, and left exactly as it was', async () => {
     const wallet = await openWallet(app.baseUrl, '100.00');
     expect((await submit(app.baseUrl, wager(wallet, { money: { amount: '25.00', currency: 'BRL' } }))).status).toBe(201);

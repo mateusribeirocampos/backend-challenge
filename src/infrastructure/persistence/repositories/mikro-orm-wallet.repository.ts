@@ -1,4 +1,5 @@
 import type { EntityManager } from '@mikro-orm/postgresql';
+import { MetricName, type Metrics } from '../../../application/ports/metrics.js';
 import type { WalletRepository } from '../../../application/ports/repositories.js';
 import type { Wallet } from '../../../domain/wallet/wallet.js';
 import { WalletEntity, type WalletRecord } from '../entities/wallet.entity.js';
@@ -8,7 +9,10 @@ import { toWallet, toWalletRecord } from '../mappers/wallet.mapper.js';
 const FRESH = { disableIdentityMap: true } as const;
 
 export class MikroOrmWalletRepository implements WalletRepository {
-  constructor(private readonly em: EntityManager) {}
+  constructor(
+    private readonly em: EntityManager,
+    private readonly metrics: Metrics,
+  ) {}
 
   async insertIfAbsent(wallet: Wallet): Promise<boolean> {
     const record = toWalletRecord(wallet);
@@ -43,18 +47,30 @@ export class MikroOrmWalletRepository implements WalletRepository {
     // already holds FOR KEY SHARE on this row through the foreign key; FOR UPDATE
     // conflicts with KEY SHARE and two different BETs on the same wallet would
     // deadlock. MikroORM's LockMode.PESSIMISTIC_WRITE emits FOR UPDATE, hence raw SQL.
-    const rows = await this.em.execute(
-      `select id, player_id, currency, balance_amount, version, created_at, updated_at
-         from wallets
-        where id = ?
-          for no key update`,
-      [walletId],
+    const rows = await this.timingLockWait(() =>
+      this.em.execute(
+        `select id, player_id, currency, balance_amount, version, created_at, updated_at
+           from wallets
+          where id = ?
+            for no key update`,
+        [walletId],
+      ),
     );
     const [row] = rows;
     if (row === undefined) {
       return undefined;
     }
     return toWallet(this.em.map(WalletEntity, row, FRESH) as WalletRecord);
+  }
+
+  /** Observed on a lock timeout too: a 2 s wait that ended in 55P03 is still a wait. */
+  private async timingLockWait<T>(lock: () => Promise<T>): Promise<T> {
+    const startedAt = performance.now();
+    try {
+      return await lock();
+    } finally {
+      this.metrics.observe(MetricName.WalletLockWait, (performance.now() - startedAt) / 1000);
+    }
   }
 
   async saveBalance(wallet: Wallet, expectedVersion: number): Promise<void> {

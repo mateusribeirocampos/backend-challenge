@@ -69,6 +69,25 @@ describe('Money.from: rejected input (spec 6.1)', () => {
   });
 });
 
+describe('Money.fromLedgerTotal: sums of many entries, past the limit of one amount', () => {
+  test('accepts a sum with more integer digits than numeric(20,2) holds, exactly', () => {
+    const total = Money.fromLedgerTotal({ amount: '1999999999999999999.98', currency: 'BRL' });
+    expect(total.subtract(brl('999999999999999999.99')).toJSON()).toEqual({ amount: '999999999999999999.99', currency: 'BRL' });
+  });
+
+  test('keeps every other rule of Money.from: no sign, no exponent, at most 2 decimals, a real currency', () => {
+    for (const amount of ['-1.00', '1e3', '1.234', 'NaN', '']) {
+      expect(() => Money.fromLedgerTotal({ amount, currency: 'BRL' })).toThrow(InvalidMoneyError);
+    }
+    expect(() => Money.fromLedgerTotal({ amount: '1.00', currency: 'XXX' })).toThrow(InvalidMoneyError);
+  });
+
+  test('stops where exact arithmetic would end (38 integer digits)', () => {
+    expect(() => Money.fromLedgerTotal({ amount: '1'.repeat(38), currency: 'BRL' })).not.toThrow();
+    expect(() => Money.fromLedgerTotal({ amount: '1'.repeat(39), currency: 'BRL' })).toThrow(InvalidMoneyError);
+  });
+});
+
 describe('Money.from: currency codes from the runtime ISO-4217 table', () => {
   test.each(['BRL', 'USD', 'EUR', 'JPY'])('current currency %p is accepted', (currency) => {
     expect(Money.from({ amount: '1.00', currency }).currency).toBe(currency);
