@@ -35,6 +35,7 @@ describe('loadConfig', () => {
       password: 'wagering',
       dbName: 'wagering',
       poolSize: 10,
+      backgroundPoolSize: 3,
       acquireTimeoutMs: 2_000,
     });
     expect(config.sqs).toEqual({
@@ -141,10 +142,11 @@ describe('loadConfig', () => {
     const config = loadConfig({
       ...validEnv,
       DATABASE_POOL_SIZE: '4',
+      DATABASE_BACKGROUND_POOL_SIZE: '2',
       DATABASE_POOL_ACQUIRE_TIMEOUT_MS: '500',
     });
 
-    expect(config.database).toMatchObject({ poolSize: 4, acquireTimeoutMs: 500 });
+    expect(config.database).toMatchObject({ poolSize: 4, backgroundPoolSize: 2, acquireTimeoutMs: 500 });
   });
 
   test('refuses an empty pool and an acquisition timeout of zero (it would mean "wait forever")', () => {
@@ -152,10 +154,12 @@ describe('loadConfig', () => {
       problemsFor({
         ...validEnv,
         DATABASE_POOL_SIZE: '0',
+        DATABASE_BACKGROUND_POOL_SIZE: '0',
         DATABASE_POOL_ACQUIRE_TIMEOUT_MS: '0',
       }),
     ).toEqual([
       'DATABASE_POOL_SIZE: must be an integer between 1 and 100',
+      'DATABASE_BACKGROUND_POOL_SIZE: must be an integer between 1 and 100',
       'DATABASE_POOL_ACQUIRE_TIMEOUT_MS: must be an integer between 100 and 60000',
     ]);
   });
