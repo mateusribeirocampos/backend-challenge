@@ -4,6 +4,7 @@ import { isTransientDatabaseError } from './database-error-classifier.js';
 const INSTALLED = Symbol.for('wagering.releaseDeadConnectionsOnRollback');
 
 type RollbackTransaction = PostgresDriver['rollbackTransaction'];
+type BeginTransaction = PostgresDriver['beginTransaction'];
 
 /**
  * Works around a connection leak in kysely 0.29 (the SQL layer of MikroORM 7).
@@ -23,6 +24,11 @@ type RollbackTransaction = PostgresDriver['rollbackTransaction'];
  * new one on demand. Any other ROLLBACK error still propagates. The error that made the
  * transaction fail is never hidden: MikroORM rethrows it after the rollback.
  *
+ * The same leak exists one step earlier: ControlledTransactionBuilder.execute() takes a
+ * connection and runs BEGIN; if BEGIN fails on a connection that just died, nobody ever
+ * releases it (the transaction object that would is never created). A BEGIN that fails
+ * that way hands the client back to the pool here, and the error still propagates.
+ *
  * Proved by test/integration/resilience/database-outage.test.ts.
  */
 export function releaseDeadConnectionsOnRollback(): void {
@@ -34,6 +40,18 @@ export function releaseDeadConnectionsOnRollback(): void {
       await rollback.call(this, connection);
     } catch (error) {
       if (!isTransientDatabaseError(error)) throw error;
+    }
+  };
+  const begin: BeginTransaction = prototype.beginTransaction;
+  prototype.beginTransaction = async function beginOrReleaseDeadConnection(this: PostgresDriver, connection, settings) {
+    try {
+      await begin.call(this, connection, settings);
+    } catch (error) {
+      if (isTransientDatabaseError(error)) {
+        // This driver only ever receives its own PostgresConnection here.
+        await this.releaseConnection(connection as Parameters<PostgresDriver['releaseConnection']>[0]);
+      }
+      throw error;
     }
   };
   prototype[INSTALLED] = true;
