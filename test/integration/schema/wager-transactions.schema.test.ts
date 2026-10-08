@@ -60,14 +60,21 @@ async function processedBet(): Promise<{ id: string; externalId: string }> {
 }
 
 describe('wager_transactions: idempotency (ADR-003)', () => {
-  test('the same idempotency key twice is refused (wager_transactions_idempotency_key_unique)', async () => {
-    const key = `provider-a:${newId()}`;
+  test('the same idempotency key twice for one provider is refused (wager_transactions_provider_idempotency_key_unique)', async () => {
+    const key = `key-${newId()}`;
     await insertTransaction({ idempotency_key: key });
 
     await expectViolation(insertTransaction({ idempotency_key: key }), {
       code: SqlState.UniqueViolation,
-      constraint: 'wager_transactions_idempotency_key_unique',
+      constraint: 'wager_transactions_provider_idempotency_key_unique',
     });
+  });
+
+  test('the same idempotency key under another provider is another operation', async () => {
+    const key = `key-${newId()}`;
+    await insertTransaction({ idempotency_key: key });
+
+    await insertTransaction({ provider_id: 'provider-b', idempotency_key: key });
   });
 
   test('the same provider + external id twice is refused (wager_transactions_provider_external_unique)', async () => {

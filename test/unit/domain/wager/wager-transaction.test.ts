@@ -144,30 +144,20 @@ describe('WagerTransaction.create', () => {
   );
 });
 
-describe('idempotency key namespace: the key must start with "{providerId}:"', () => {
+describe('idempotency key: any format, scoped to the provider by the schema', () => {
   const base = submitProps({ kind: WagerTransactionKind.Bet, money: brl('1.00'), externalTransactionId: 'k1' });
 
-  test('the default key and any other suffix inside the provider namespace are accepted', () => {
-    expect(WagerTransaction.create({ ...base, idempotencyKey: 'provider-a:k1' }).idempotencyKey).toBe('provider-a:k1');
-    expect(WagerTransaction.create({ ...base, idempotencyKey: 'provider-a:retry-batch-7' }).idempotencyKey).toBe(
-      'provider-a:retry-batch-7',
-    );
-  });
-
   test.each([
-    ['another provider namespace (provider-b squatting provider-a keys)', 'provider-b:k1'],
-    ['the reserved internal namespace of OPENING', 'internal:opening-0192f291-27dd-7d3f-8071-5f8685deef37'],
-    ['the provider id without the colon', 'provider-ak1'],
-    ['only the prefix, nothing after it', 'provider-a:'],
-    ['no namespace at all', 'k1'],
-  ])('refused: %s', (_case, idempotencyKey) => {
-    expect(createError({ ...base, idempotencyKey }).code).toBe(ContractViolationCode.IdempotencyKeyInvalid);
+    ['the recommended default', 'provider-a:k1'],
+    ['a bare UUID', '0192f291-27dd-7d3f-8071-5f8685deef37'],
+    ['a key that looks like another provider', 'provider-b:k1'],
+    ['a short key', 'k1'],
+  ])('any key is accepted, kept as sent: %s (the schema scopes it to the provider)', (_case, idempotencyKey) => {
+    expect(WagerTransaction.create({ ...base, idempotencyKey }).idempotencyKey).toBe(idempotencyKey);
   });
 
-  test('a providerId with ":" is refused: "a" and "a:b" would share the namespace "a:b:..."', () => {
-    const error = createError({ ...base, providerId: 'provider:a', idempotencyKey: 'provider:a:k1' });
-
-    expect(error.code).toBe(ContractViolationCode.InvalidFormat);
+  test('a providerId with ":" is accepted: keys are scoped by the provider column, not by a text prefix', () => {
+    expect(WagerTransaction.create({ ...base, providerId: 'provider:a', idempotencyKey: 'k1' }).providerId).toBe('provider:a');
   });
 });
 

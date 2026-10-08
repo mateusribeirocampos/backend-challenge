@@ -62,12 +62,7 @@ export const ContractViolationCode = {
   SelfReference: 'SELF_REFERENCE',
   /** Zero amount where the kind must move the balance (BET, WIN, REFUND, ROLLBACK). */
   InvalidAmount: 'INVALID_AMOUNT',
-  /**
-   * The idempotency key is not inside the provider namespace "{providerId}:...". Without
-   * this, provider B could take provider A's keys, or the reserved "internal:" ones.
-   */
-  IdempotencyKeyInvalid: 'IDEMPOTENCY_KEY_INVALID',
-  /** A field has the wrong shape (not a UUID, a providerId with ":", a control character, text too long). */
+  /** A field has the wrong shape (not a UUID, a control character, text too long). */
   InvalidFormat: 'INVALID_FORMAT',
   /** Money that Money.from refuses: NaN, "1e3", "1.234", "-5.00", "brl"... */
   InvalidMoney: 'INVALID_MONEY',

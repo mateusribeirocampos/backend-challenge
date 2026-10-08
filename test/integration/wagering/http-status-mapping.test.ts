@@ -134,16 +134,6 @@ describe('HTTP status mapping (ADR-007)', () => {
     const invalidRequests: { name: string; change: (body: WagerBody) => { body: unknown; key: string | null }; code: string }[] = [
       { name: 'missing Idempotency-Key', change: (body) => ({ body, key: null }), code: 'MISSING_FIELD' },
       { name: 'blank Idempotency-Key', change: (body) => ({ body, key: '   ' }), code: 'MISSING_FIELD' },
-      {
-        name: 'key of another provider',
-        change: (body) => ({ body, key: `provider-b:${body.externalTransactionId}` }),
-        code: 'IDEMPOTENCY_KEY_INVALID',
-      },
-      {
-        name: 'key in the reserved internal namespace',
-        change: (body) => ({ body, key: `internal:opening-${body.walletId}` }),
-        code: 'IDEMPOTENCY_KEY_INVALID',
-      },
       { name: 'walletId not a UUID', change: (body) => ({ body: { ...body, walletId: 'wallet-1' }, key: defaultKey(body) }), code: 'INVALID_FORMAT' },
       { name: 'playerId not a UUID', change: (body) => ({ body: { ...body, playerId: '123' }, key: defaultKey(body) }), code: 'INVALID_FORMAT' },
       { name: 'kind OPENING', change: (body) => ({ body: { ...body, kind: 'OPENING' }, key: defaultKey(body) }), code: 'INTERNAL_KIND_NOT_ALLOWED' },

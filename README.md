@@ -5,9 +5,6 @@ Stack: Bun, TypeScript estrito, NestJS, MikroORM 7 com PostgreSQL, SQS emulado p
 
 As decisões técnicas, os trade-offs e as limitações estão em [ARCHITECTURE.md](ARCHITECTURE.md).
 
-> [!IMPORTANT]
-> **O `Idempotency-Key` precisa começar com `{providerId}:`**, como no formato recomendado pelo enunciado: `provider-a:transaction-123` para o `providerId` `provider-a`. Uma chave fora desse espaço (`abc-123`, um UUID solto) recebe `400` com `IDEMPOTENCY_KEY_INVALID` e a mensagem `Idempotency key must start with "provider-a:" followed by the operation id`. Motivo: a chave é única no banco inteiro, e sem o prefixo um provedor poderia ocupar ou bloquear a chave de outro. Vale o mesmo para `data.idempotencyKey` nas mensagens SQS, onde o campo é obrigatório. `playerId` e `walletId` são UUIDs, como nos exemplos do enunciado.
-
 ## Requisitos
 
 - Bun 1.x (`curl -fsSL https://bun.sh/install | bash`)
@@ -184,7 +181,7 @@ Tabela completa, requisito por requisito, com o teste que prova cada um. O resum
 | Idempotência persistente: replay devolve o resultado original com `idempotentReplay` e o saldo da época | `bun test test/integration/wagering/idempotency.test.ts` | `src/infrastructure/persistence/repositories/mikro-orm-wager-transaction.repository.ts` (`insertIfAbsent`) |
 | Mesma chave com payload diferente é conflito (409) e não altera nada | mesmo teste | `src/application/wagering/process-wager-transaction.ts` |
 | Hash do payload sobre JSON canônico, sem o header | `bun test test/unit/application/wagering` | `src/application/wagering/payload-hash.ts` |
-| Chave de idempotência no espaço do provedor (`{providerId}:`) | `bun test test/unit/domain/wager` e `test/integration/wagering/http-status-mapping.test.ts` | `src/domain/wager/wager-transaction.ts` |
+| Chave de idempotência única por provedor, em qualquer formato: a mesma chave em dois provedores são duas operações; no mesmo provedor, replay ou conflito | `bun test test/integration/wagering/idempotency.test.ts test/integration/schema/wager-transactions.schema.test.ts` | migration `idempotency_key_per_provider` |
 | Wallet, transação, ledger e outbox na mesma transação SQL (tudo ou nada) | `bun test test/integration/wagering/atomicity-and-outbox.test.ts` força uma falha depois do lançamento do ledger | `src/application/wagering/process-wager-transaction.ts` |
 | A linha da inbox volta junto no rollback: a mensagem que falhou (wallet ainda inexistente) não fica marcada como recebida e é processada quando a wallet existe | `bun test test/integration/messaging/consumer-transient-failure.test.ts` | `process-wager-transaction.ts` (`executeDelivery`) |
 | Criar wallet grava a transação `OPENING` e o crédito na mesma transação; wallet duplicada é conflito | mesmo teste e `http-status-mapping.test.ts` | `src/application/wallets/open-wallet.ts` |

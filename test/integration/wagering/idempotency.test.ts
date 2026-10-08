@@ -47,6 +47,37 @@ describe('idempotency (spec 9, ADR-003)', () => {
     await expectBalanceMatchesLedger(orm, app.baseUrl, wallet.id, '45.00');
   });
 
+  test('any Idempotency-Key is accepted: a bare UUID behaves like the recommended "{providerId}:{externalTransactionId}"', async () => {
+    const wallet = await openWallet(app.baseUrl, '100.00');
+    const bet = wager(wallet, { money: { amount: '25.00', currency: 'BRL' } });
+    const key = randomUUID();
+
+    const first = await submit(app.baseUrl, bet, key);
+    const replay = await submit(app.baseUrl, bet, key);
+
+    expect(first.status).toBe(201);
+    expect(replay.status).toBe(200);
+    expect(replay.body).toEqual({ ...first.body, idempotentReplay: true });
+    await expectBalanceMatchesLedger(orm, app.baseUrl, wallet.id, '75.00');
+  });
+
+  test('the same key from two providers: two independent operations, neither blocks nor replays the other', async () => {
+    const wallet = await openWallet(app.baseUrl, '100.00');
+    const key = `shared-${randomUUID()}`;
+    const fromA = wager(wallet, { providerId: 'provider-a', money: { amount: '25.00', currency: 'BRL' } });
+    const fromB = wager(wallet, { providerId: 'provider-b', money: { amount: '30.00', currency: 'BRL' } });
+
+    const a = await submit(app.baseUrl, fromA, key);
+    const b = await submit(app.baseUrl, fromB, key);
+
+    expect([a.status, b.status]).toEqual([201, 201]);
+    expect(b.body.transactionId).not.toBe(a.body.transactionId);
+    // Inside one provider the key still means one operation: replay, or conflict with another payload.
+    expect((await submit(app.baseUrl, fromA, key)).status).toBe(200);
+    expect((await submit(app.baseUrl, { ...fromA, money: { amount: '26.00', currency: 'BRL' } }, key)).status).toBe(409);
+    await expectBalanceMatchesLedger(orm, app.baseUrl, wallet.id, '45.00');
+  });
+
   test('the same operation with the amount written differently ("25" vs "25.00") is a replay, not a conflict', async () => {
     const wallet = await openWallet(app.baseUrl, '100.00');
     const bet = wager(wallet, { money: { amount: '25.00', currency: 'BRL' } });

@@ -65,10 +65,10 @@ describe('classifyProcessingFailure', () => {
       'MESSAGE_ID_CONFLICT',
     ],
     [
-      'a contract rule of the domain (REFUND without reference, key outside the namespace...)',
-      new InvalidWagerTransactionError(ContractViolationCode.IdempotencyKeyInvalid, 'Idempotency key must start with "provider-a:"'),
+      'a contract rule of the domain (REFUND without reference, a field in the wrong shape...)',
+      new InvalidWagerTransactionError(ContractViolationCode.ReferenceRequired, 'REFUND requires a reference'),
       'CONTRACT_VIOLATION',
-      'IDEMPOTENCY_KEY_INVALID',
+      'REFERENCE_REQUIRED',
     ],
     [
       'money the domain refuses',
