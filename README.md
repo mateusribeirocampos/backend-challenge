@@ -141,6 +141,7 @@ Um REFUND enviado antes da sua BET responde `202` com `PENDING_REFERENCE`. O wor
 | `bun test` | todos os testes (unitários e de integração) |
 | `bun run test:unit` | só os unitários, sem containers |
 | `bun run test:integration` | só os de integração, precisam do `docker compose up -d` |
+| `bun run test:load` | teste de carga com 3 instâncias reais, PostgreSQL e MiniStack (cerca de 3 min, fora do `bun test` e da CI); reescreve [docs/teste-de-carga.md](docs/teste-de-carga.md) e grava os dados brutos em `load-results/` |
 | `bun run migration:create <nome>` | cria uma migration vazia com `up()` e `down()` |
 | `bun run migration:up` | aplica as migrations pendentes |
 | `bun run migration:down` | reverte só a última migration aplicada |
@@ -212,6 +213,7 @@ Tabela completa, requisito por requisito, com o teste que prova cada um. O resum
 | Instância morta com `SIGKILL` segurando uma mensagem SQS e uma requisição HTTP: reenvio com a mesma chave, redelivery para outra instância, processo substituto; depois `SIGTERM` em todas e processos novos terminam a mensagem, a referência pendente e a outbox deixadas para trás | `bun test test/integration/multi-instance/restart.test.ts` | `src/interfaces/messaging/sqs-wager-consumer.ts`, `src/application/wagering/resolve-pending-references.ts`, `src/application/outbox/publish-outbox.ts` |
 | Métricas no formato do Prometheus em `GET /metrics`: transações por status, duplicatas, retries, DLQ, conflitos de lock, outbox lag e histograma de latência por origem (HTTP, SQS) | `bun test test/integration/observability/metrics-endpoint.test.ts test/unit/infrastructure/observability` | `src/infrastructure/observability/prometheus-text.ts`, `src/infrastructure/observability/in-memory-metrics.ts` |
 | Logs JSON com `correlationId`, `messageId`, `transactionId`, `walletId`, `providerId`, sem valores; erro inesperado só por classe, SQLSTATE e constraint nos logs, no `500` e na DLQ | `bun test test/integration/observability/error-sanitization.test.ts test/unit/application/error-summary.test.ts` | `src/application/error-summary.ts`, `src/interfaces/http/api-exception.filter.ts`, `src/interfaces/messaging/processing-failure.ts` |
+| Teste de carga (diferencial da seção 14): throughput, p50/p95/p99, erros por classe, conflitos de lock e outbox lag em wallets distintas, hot wallet e misto HTTP + SQS; depois de cada cenário, saldo igual ao ledger e ao esperado, nada negativo, nenhum efeito duplicado, filas vazias e todo evento entregue | `bun run test:load` (precisa do `docker compose up -d`); percentis e relatório em `bun test test/unit/load` | `load/`, resultado em `docs/teste-de-carga.md` |
 
 </details>
 
