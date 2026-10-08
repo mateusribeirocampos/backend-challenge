@@ -205,6 +205,7 @@ Tabela completa, requisito por requisito, com o teste que prova cada um. O resum
 | Falhas transitórias do banco viram 503 com `Retry-After`; violação de constraint, estouro numérico e `08P01` não | `bun test test/unit/infrastructure` e o teste de lock timeout em `http-status-mapping.test.ts` | `src/infrastructure/persistence/database-error-classifier.ts` |
 | PostgreSQL cai com transações em andamento e volta: 503 durante a queda (nunca 500), readiness 503, nada gravado; na volta o mesmo processo se recupera e o reenvio com a mesma chave tem um efeito só | `bun test test/integration/resilience/database-outage.test.ts` | `src/infrastructure/persistence/release-dead-connections.ts` |
 | PostgreSQL cai com consumer, publisher e worker ligados: as mensagens ficam na fila (transitório, nada na DLQ); na volta cada uma tem um efeito, o REFUND que esperava a BET é resolvido e todo evento é publicado uma vez | `bun test test/integration/resilience/database-outage-background.test.ts` | os dois pools e o classificador de erros |
+| Banco que aceita a conexão e não responde: o readiness dá 503 no prazo e não prende conexão do pool; na volta as transações usam todas as conexões | `bun test test/integration/resilience/readiness-silent-database.test.ts` | `src/infrastructure/persistence/database-check.ts` |
 | SQS cai e volta: o HTTP segue respondendo 201 (o evento espera na outbox); na volta o publisher envia o acumulado e o consumer processa o que esperava, uma vez cada | `bun test test/integration/resilience/sqs-outage.test.ts` | outbox e consumer, seção Processamento assíncrono do `ARCHITECTURE.md` |
 | Pool sem conexão livre falha em 2 s com 503, em vez de esperar sem limite; publisher e worker têm pool próprio e publicam mesmo com o pool das requisições preso no lock de uma wallet | `bun test test/integration/wagering/connection-pools.test.ts` | `src/infrastructure/persistence/mikro-orm.config.ts`, `src/background-workers.module.ts` |
 | Crédito acima do maior saldo que a coluna guarda vira rejeição `BALANCE_LIMIT_EXCEEDED`, não erro 500 | `bun test test/unit/domain` e `http-status-mapping.test.ts` | `src/domain/wallet/wallet.ts` (`canCredit`) |
@@ -240,7 +241,7 @@ Tabela completa, requisito por requisito, com o teste que prova cada um. O resum
 ## Health checks
 
 - `GET /health/live`: 200 se o processo responde. Não consulta dependências.
-- `GET /health/ready`: 200 se PostgreSQL (`select 1`) e SQS (`GetQueueUrl` da fila principal) respondem; 503 com o nome da dependência que falhou.
+- `GET /health/ready`: 200 se PostgreSQL (`select 1` numa conexão própria, fora do pool das transações, encerrada no prazo de 2 s) e SQS (`GetQueueUrl` da fila principal) respondem; 503 com o nome da dependência que falhou.
 
 ## Por que MiniStack e não LocalStack
 
