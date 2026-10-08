@@ -16,7 +16,9 @@ interface Pair {
  *
  *   cut()      every open connection dies at once, as when the server goes down mid-query;
  *   refuse()   new connections are dropped as soon as they open (the server is still down);
- *   restore()  traffic flows again; the application has to recover on its own.
+ *   restore()  traffic flows again; the application has to recover on its own;
+ *   mute()     connections stay open but every byte is dropped: a server that accepts and
+ *              never answers (unmute() lets traffic through again; what was dropped is lost).
  *
  * The test keeps its own direct connection to check the outcome, so the proxy never
  * hides what really reached the database.
@@ -24,6 +26,7 @@ interface Pair {
 export class TcpProxy {
   private readonly pairs = new Set<Pair>();
   private refusing = false;
+  private muted = false;
 
   private constructor(
     private readonly listener: TCPSocketListener<Pair>,
@@ -46,7 +49,7 @@ export class TcpProxy {
         },
         data: (client, data) => {
           const pair = client.data;
-          if (pair === undefined) return;
+          if (pair === undefined || proxy?.muted === true) return;
           pair.toUpstream.push(new Uint8Array(data));
           if (pair.upstream !== undefined) flush(pair.upstream, pair.toUpstream);
         },
@@ -63,6 +66,19 @@ export class TcpProxy {
 
   get port(): number {
     return this.listener.port;
+  }
+
+  /** Connections open through the proxy right now. */
+  get openConnections(): number {
+    return this.pairs.size;
+  }
+
+  mute(): void {
+    this.muted = true;
+  }
+
+  unmute(): void {
+    this.muted = false;
   }
 
   /** Every connection open right now is killed (no graceful close), on both sides. */
@@ -109,6 +125,7 @@ export class TcpProxy {
           flush(upstream, pair.toUpstream);
         },
         data: (_upstream, data) => {
+          if (this.muted) return;
           pair.toClient.push(new Uint8Array(data));
           flush(pair.client, pair.toClient);
         },
