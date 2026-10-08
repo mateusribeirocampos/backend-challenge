@@ -117,8 +117,12 @@ export interface Environment {
   /** SendMessage rate of the emulator on an empty FIFO queue and after a few thousand messages. */
   readonly sqsSendProbe: SendProbe;
   readonly appInstances: number;
-  /** Connections per instance (pg-pool default: the project does not set one). */
+  /** Connections per instance of the main pool (HTTP and SQS consumer). */
   readonly poolSizePerInstance: number;
+  /** Connections per instance of the separate pool of the outbox publisher and the PENDING_REFERENCE worker. */
+  readonly backgroundPoolSizePerInstance: number;
+  /** Longest wait for a free connection before the request fails as transient. */
+  readonly poolAcquireTimeoutMs: number;
   readonly lockTimeout: string;
   readonly consumer: { readonly visibilityTimeoutSeconds: number; readonly waitTimeSeconds: number; readonly maxMessages: number };
   readonly publisher: { readonly leaseSeconds: number; readonly batchSize: number; readonly pollIntervalMs: number };

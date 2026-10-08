@@ -114,7 +114,7 @@ Na AWS, o mesmo é feito em lote com `StartMessageMoveTask` (ou pelo console, "S
 
 ### Eventos publicados, referências pendentes, ledger e reconciliação
 
-Cada instância também roda o publisher da outbox (`OUTBOX_PUBLISHER_ENABLED`) e o worker de `PENDING_REFERENCE` (`PENDING_REFERENCE_WORKER_ENABLED`), os dois ligados por padrão; as outras variáveis estão no `.env.example`. Com a aplicação de pé:
+Cada instância também roda o publisher da outbox (`OUTBOX_PUBLISHER_ENABLED`) e o worker de `PENDING_REFERENCE` (`PENDING_REFERENCE_WORKER_ENABLED`), os dois ligados por padrão; as outras variáveis estão no `.env.example`. Os dois usam um pool de conexões próprio (`DATABASE_BACKGROUND_POOL_SIZE`, padrão 3), separado do pool das requisições HTTP e do consumer (`DATABASE_POOL_SIZE`, padrão 10). Quem espera mais que `DATABASE_POOL_ACQUIRE_TIMEOUT_MS` (padrão 2000) por uma conexão recebe falha transitória: `503` no HTTP, retry com backoff no SQS. Com a aplicação de pé:
 
 ```bash
 # eventos publicados (WagerTransactionProcessed, WalletBalanceChanged...), um por linha
@@ -187,6 +187,7 @@ Tabela completa, requisito por requisito, com o teste que prova cada um. O resum
 | Envelope dos eventos e backoff com jitter da outbox | `bun test test/unit/domain/events test/unit/domain/outbox` | `src/domain/events/integration-event.ts`, `src/domain/outbox/outbox-message.ts` |
 | Status HTTP distintos para payload inválido, conflito, rejeição, pendente e falha transitória; envelope de erro único; caracteres de controle e corpo grande demais são 400 e 413, nunca 503 ou 500 | `bun test test/integration/wagering/http-status-mapping.test.ts` | `src/interfaces/http/api-exception.filter.ts`, `src/interfaces/http/wager-response-status.ts` |
 | Falhas transitórias do banco viram 503 com `Retry-After`; violação de constraint, estouro numérico e `08P01` não | `bun test test/unit/infrastructure` e o teste de lock timeout em `http-status-mapping.test.ts` | `src/infrastructure/persistence/database-error-classifier.ts` |
+| Pool sem conexão livre falha em 2 s com 503, em vez de esperar sem limite; publisher e worker têm pool próprio e publicam mesmo com o pool das requisições preso no lock de uma wallet | `bun test test/integration/wagering/connection-pools.test.ts` | `src/infrastructure/persistence/mikro-orm.config.ts`, `src/background-workers.module.ts` |
 | Crédito acima do maior saldo que a coluna guarda vira rejeição `BALANCE_LIMIT_EXCEEDED`, não erro 500 | `bun test test/unit/domain` e `http-status-mapping.test.ts` | `src/domain/wallet/wallet.ts` (`canCredit`) |
 | Ponto de extensão de autenticação | leitura do código | `src/interfaces/http/provider-auth.guard.ts`, `src/application/ports/provider-identity.ts` |
 | Consumer SQS reutiliza o mesmo caso de uso do HTTP; mensagem processada uma vez, com saldo, um lançamento e linha na inbox | `bun test test/integration/messaging/consumer-processing.test.ts` | `src/application/wagering/process-wager-transaction.ts` (`executeDelivery`), `src/interfaces/messaging/wager-message-handler.ts` |

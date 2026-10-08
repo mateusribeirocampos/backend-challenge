@@ -11,13 +11,20 @@ export const MIGRATIONS_DIR = fileURLToPath(new URL('./migrations', import.meta.
  * Single source of the ORM configuration, used by the Nest app, the migration
  * script and the integration tests (each one passes its own DatabaseConfig).
  */
-export function buildMikroOrmConfig(database: DatabaseConfig): Options {
+export function buildMikroOrmConfig(database: DatabaseConfig, poolSize = database.poolSize): Options {
   return defineConfig({
     host: database.host,
     port: database.port,
     user: database.user,
     password: database.password,
     dbName: database.dbName,
+
+    pool: { max: poolSize },
+    // Passed to pg's Pool. connectionTimeoutMillis bounds the wait for a free connection
+    // (and the opening of a new one). Past it pg raises "timeout exceeded when trying to
+    // connect", classified as transient: HTTP 503 + Retry-After, SQS retry with backoff.
+    // Unset, pg waits forever: under overload the latency would grow with no limit.
+    driverOptions: { connectionTimeoutMillis: database.acquireTimeoutMs },
 
     // Entities are listed explicitly (defineEntity schemas, outside the domain).
     // No folder discovery and no metadata provider, so nothing depends on how
