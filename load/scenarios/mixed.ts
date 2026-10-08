@@ -49,7 +49,7 @@ export async function runMixed(context: ScenarioContext): Promise<ScenarioResult
   const wallets = await openWallets(firstInstance(context), settings.mixedWallets);
   for (const wallet of wallets) expected.track(wallet);
   const secondRefunds: SecondRefunds = { sent: 0, refusedAsReversed: 0 };
-  const producer = new SqsRoundProducer(context.sqs, context.queues.wager.url, wallets, expected);
+  const producer = new SqsRoundProducer(context.sqs, context.queues.wager.url, expected);
 
   const step = await measureStep(context, {
     label: `${settings.mixedHttpRoundsPerSecond} rodadas/s HTTP + ${settings.mixedSqsRoundsPerSecond} rodadas/s SQS`,
@@ -140,7 +140,6 @@ class SqsRoundProducer {
   constructor(
     private readonly sqs: SQSClient,
     private readonly queueUrl: string,
-    private readonly wallets: readonly LoadWallet[],
     private readonly expected: ExpectedBalances,
   ) {}
 

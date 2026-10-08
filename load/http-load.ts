@@ -74,7 +74,7 @@ export async function postUntilFinal(
   throw new Error(`no final answer for ${path} after ${MAX_ATTEMPTS} attempts`);
 }
 
-async function timedPost(
+export async function timedPost(
   baseUrl: string,
   path: string,
   body: unknown,
@@ -83,19 +83,30 @@ async function timedPost(
 ): Promise<(FinalAnswer & { retryAfter: string | null }) | undefined> {
   const startedAtMs = Date.now();
   const started = performance.now();
+  let response: Response;
+  let text: string;
   try {
-    const response = await fetch(`${baseUrl}${path}`, {
+    response = await fetch(`${baseUrl}${path}`, {
       method: 'POST',
       headers: { 'content-type': 'application/json', ...headers },
       body: JSON.stringify(body),
     });
-    const text = await response.text();
-    recorder.record({ startedAtMs, latencyMs: performance.now() - started, status: response.status });
-    const parsed = (text === '' ? {} : JSON.parse(text)) as Record<string, unknown>;
-    return { status: response.status, body: parsed, retryAfter: response.headers.get('retry-after') };
+    text = await response.text();
   } catch {
     recorder.record({ startedAtMs, latencyMs: performance.now() - started, status: NETWORK_ERROR });
     return undefined;
+  }
+  // One sample per attempt: an answer that is not JSON (a proxy's HTML 502) is still that status.
+  recorder.record({ startedAtMs, latencyMs: performance.now() - started, status: response.status });
+  return { status: response.status, body: jsonObjectOrEmpty(text), retryAfter: response.headers.get('retry-after') };
+}
+
+function jsonObjectOrEmpty(text: string): Record<string, unknown> {
+  try {
+    const parsed: unknown = text === '' ? {} : JSON.parse(text);
+    return typeof parsed === 'object' && parsed !== null ? (parsed as Record<string, unknown>) : {};
+  } catch {
+    return {};
   }
 }
 

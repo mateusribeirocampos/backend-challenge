@@ -129,7 +129,10 @@ export class MikroOrmWagerTransactionRepository implements WagerTransactionRepos
   }
 
   private async findOneBy(
-    where: { id: string } | { idempotencyKey: string } | { providerId: string; externalTransactionId: string },
+    where:
+      | { id: string }
+      | { providerId: string; idempotencyKey: string }
+      | { providerId: string; externalTransactionId: string },
   ): Promise<WagerTransaction | undefined> {
     const record = await this.em.findOne(WagerTransactionEntity, where, FRESH);
     return record === null ? undefined : toWagerTransaction(record);

@@ -12,7 +12,8 @@ export class PersistenceModule {
       // forRoot also registers the RequestContext middleware (a forked EntityManager
       // per HTTP request) and closes the ORM on application shutdown.
       imports: [MikroOrmModule.forRoot(buildMikroOrmConfig(database))],
-      providers: [DatabaseCheck],
+      // Its own connection per probe, outside the pool (see DatabaseCheck).
+      providers: [{ provide: DatabaseCheck, useFactory: () => new DatabaseCheck(database) }],
       exports: [DatabaseCheck],
     };
   }
