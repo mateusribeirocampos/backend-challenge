@@ -145,6 +145,9 @@ describe('SQS consumer: transient failures (spec 10)', () => {
       await waitUntil('the first delivery was retried as WALLET_NOT_FOUND', () =>
         consumer.metrics.value(MetricName.MessageRetries, { error_code: 'WALLET_NOT_FOUND' }) >= 1,
       );
+      // The failed attempt rolled back its inbox row with the rest: a row left behind would turn
+      // the redelivery into a "duplicate" and the operation would never be processed.
+      expect(await inboxRows(orm, message.messageId)).toEqual([]);
       // The wallet arrives (over HTTP in real life; written directly here to keep the chosen id).
       await openWalletWithBalance(orm, '100.00', { id: walletId, playerId });
 
