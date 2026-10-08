@@ -61,6 +61,12 @@ describe('isTransientDatabaseError: "retry with the same key" vs "do not retry"'
     expect(isTransientDatabaseError(new Error('Connection terminated unexpectedly'))).toBe(true);
   });
 
+  test('a query on a client whose connection already died is transient, not a bug (pg message, no code)', () => {
+    // What pg raises for the next statement (ROLLBACK included) on a client that lost its socket.
+    expect(isTransientDatabaseError(new Error('Client has encountered a connection error and is not queryable'))).toBe(true);
+    expect(isTransientDatabaseError(new Error('Client was closed and is not queryable'))).toBe(true);
+  });
+
   test('no free connection in the pool within the acquisition timeout is transient (HTTP 503, SQS retry with backoff)', () => {
     // Exactly what pg-pool raises when connectionTimeoutMillis expires: a plain Error with
     // no code. em.transactional lets it through as is; em.execute wraps it in a DriverException.

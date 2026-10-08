@@ -4,6 +4,7 @@ import { defineConfig, type Options } from '@mikro-orm/postgresql';
 import type { DatabaseConfig } from '../config/app-config.js';
 import { BlankMigrationGenerator } from './blank-migration-generator.js';
 import { ENTITIES } from './entities/index.js';
+import { releaseDeadConnectionsOnRollback } from './release-dead-connections.js';
 
 export const MIGRATIONS_DIR = fileURLToPath(new URL('./migrations', import.meta.url));
 
@@ -12,6 +13,8 @@ export const MIGRATIONS_DIR = fileURLToPath(new URL('./migrations', import.meta.
  * script and the integration tests (each one passes its own DatabaseConfig).
  */
 export function buildMikroOrmConfig(database: DatabaseConfig, poolSize = database.poolSize): Options {
+  // A connection lost mid-transaction must go back to the pool (kysely leak, see the module).
+  releaseDeadConnectionsOnRollback();
   return defineConfig({
     host: database.host,
     port: database.port,
