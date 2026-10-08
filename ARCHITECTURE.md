@@ -18,7 +18,7 @@ Em três frases: toda operação roda numa única transação SQL que grava prim
 | Publisher e worker com pool próprio (`DATABASE_BACKGROUND_POOL_SIZE`, 3) | na hot wallet as 10 conexões do pool ficavam no lock e a publicação caía para 4,3 eventos/s | pool único maior: só adia o problema | `src/background-workers.module.ts` |
 | Idempotência por insert-first com `ON CONFLICT DO NOTHING` | a segunda requisição idêntica espera no índice e lê o resultado final; não existe estado "em andamento" | consultar antes de gravar: corrida entre a consulta e o insert | `src/application/wagering/process-wager-transaction.ts` |
 | Resultado original gravado na transação | o replay devolve o saldo daquele momento | recalcular no replay | coluna `result_balance_amount` |
-| Chave de idempotência começa com `{providerId}:` | a chave única é global; sem prefixo, um provedor ocuparia a chave de outro | aceitar qualquer chave | `src/domain/wager/wager-transaction.ts` |
+| Chave de idempotência única por provedor, em qualquer formato | dois provedores podem mandar a mesma chave sem um bloquear ou receber o replay do outro | chave única global com prefixo `{providerId}:` obrigatório (400 para qualquer outra chave) | migration `idempotency_key_per_provider` |
 | Garantias no schema (CHECK, UNIQUE, triggers, constraint triggers diferidas) | se o código tiver bug, o banco recusa o commit | garantias só na aplicação | `src/infrastructure/persistence/migrations` |
 | Ledger encadeado por `wallet_version` | saldo igual ao fim do ledger em todo commit e proteção contra lost update | coluna `seq` só para ordenar | migration `create_wallet_ledger_entries` |
 | Transactional outbox | evento só existe se o commit existir | publicar no SQS dentro da transação | `src/domain/outbox/outbox-message.ts` |
@@ -74,7 +74,7 @@ Camadas: `domain` (regras puras, só `decimal.js`) ← `application` (casos de u
 - Três processos reais de `src/main.ts` (HTTP, consumer, publisher e worker em cada um) sobre o mesmo banco e as mesmas filas: `test/integration/multi-instance`. Uma instância morre com `SIGKILL` segurando uma mensagem e uma requisição; o provedor reenvia com a mesma chave, a mensagem volta depois do visibility timeout, e no fim cada wallet bate com o ledger.
 
 ### Idempotência persistente
-- Fonte da verdade: `UNIQUE (idempotency_key)` e `UNIQUE (provider_id, external_transaction_id)`. Sem cache.
+- Fonte da verdade: `UNIQUE (provider_id, idempotency_key)` e `UNIQUE (provider_id, external_transaction_id)`. Sem cache. `{providerId}:{externalTransactionId}` é só o formato recomendado; qualquer chave vale.
 - Mesmo payload: replay com `idempotentReplay: true` e o saldo da época. Payload diferente: `409`, sem efeito.
 - `payloadHash`: `sha256` do JSON canônico (chaves ordenadas, sem espaços) dos campos de negócio, com o valor normalizado (`"25"` = `"25.00"`) e UUIDs em minúsculas. O header e metadados de transporte ficam fora.
 - Se a conexão cair durante o COMMIT, o reenvio com a mesma chave processa (nada gravado) ou vira replay (gravado): nunca efeito duplo.
@@ -136,7 +136,6 @@ Camadas: `domain` (regras puras, só `decimal.js`) ← `application` (casos de u
 | Referência não chega em 15 conferências (~4,5 a 9 min); se existe mas não terminou, a espera continua | `REJECTED` com `REFERENCE_NOT_FOUND` só quando ela não existe | rejeitar cedo perderia um REFUND; um ROLLBACK rejeitado enquanto o seu REFUND credita depois deixaria o crédito sem reversão |
 | Wallet inexistente | HTTP: `404`, nada gravado; SQS: transitório | a wallet pode ser criada pelo HTTP logo depois |
 | Fila de eventos | `wagering-events.fifo` | o enunciado só nomeia a de entrada e a DLQ |
-| `Idempotency-Key` fora de `{providerId}:` | `400 IDEMPOTENCY_KEY_INVALID` (o enunciado recomenda esse formato; aqui é obrigatório) | a chave é única global; sem o prefixo um provedor ocuparia a chave de outro |
 | WIN ou LOSS que aponta para uma BET que ainda não chegou | espera em `PENDING_REFERENCE`, como REFUND e ROLLBACK | pagar sem a aposta creditaria algo que talvez nunca existiu |
 | `playerId`, `walletId` e `data.idempotencyKey` (SQS) | UUID nos ids; a chave é obrigatória na mensagem | como nos exemplos do enunciado; sem a chave a mensagem vai para a DLQ |
 
