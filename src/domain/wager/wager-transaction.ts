@@ -12,7 +12,7 @@ import { canTransition, isTerminalStatus, WagerTransactionStatus } from './wager
 /** providerId used only by OPENING rows. A real provider cannot use it. */
 export const INTERNAL_PROVIDER_ID = 'internal';
 
-/** Separates the provider namespace from the rest of an idempotency key: "provider-a:transaction-123". */
+/** Separator of the idempotency keys built here (OPENING: "internal:{id}"), like the recommended "provider-a:transaction-123". */
 export const IDEMPOTENCY_NAMESPACE_SEPARATOR = ':';
 
 /** U+0000 to U+001F and U+007F: the C0 control characters and DEL. */
@@ -345,7 +345,6 @@ export class WagerTransaction {
         `providerId "${INTERNAL_PROVIDER_ID}" is reserved`,
       );
     }
-    WagerTransaction.assertIdempotencyNamespace(props.providerId, props.idempotencyKey);
 
     WagerTransaction.assertReferenceShape(props);
     WagerTransaction.assertAmount(props.kind, props.money);
@@ -366,29 +365,6 @@ export class WagerTransaction {
           `${field} must not contain control characters`,
         );
       }
-    }
-  }
-
-  /**
-   * Every key lives in its provider's namespace: "{providerId}:{anything}". The key is the
-   * source of truth for idempotency, so a key outside the namespace would let one
-   * provider collide with (or block) another provider's operations, or with the
-   * "internal:" keys of OPENING. A ":" inside providerId would make two namespaces
-   * overlap ("a" and "a:b" both own "a:b:x"), so it is refused too.
-   */
-  private static assertIdempotencyNamespace(providerId: string, idempotencyKey: string): void {
-    if (providerId.includes(IDEMPOTENCY_NAMESPACE_SEPARATOR)) {
-      throw new InvalidWagerTransactionError(
-        ContractViolationCode.InvalidFormat,
-        `providerId cannot contain "${IDEMPOTENCY_NAMESPACE_SEPARATOR}"`,
-      );
-    }
-    const namespace = `${providerId}${IDEMPOTENCY_NAMESPACE_SEPARATOR}`;
-    if (!idempotencyKey.startsWith(namespace) || idempotencyKey.length === namespace.length) {
-      throw new InvalidWagerTransactionError(
-        ContractViolationCode.IdempotencyKeyInvalid,
-        `Idempotency key must start with "${namespace}" followed by the operation id`,
-      );
     }
   }
 

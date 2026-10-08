@@ -42,7 +42,8 @@ export interface WagerTransactionRepository {
   /** Plain insert, for the OPENING transaction of a new wallet. */
   insert(transaction: WagerTransaction): Promise<void>;
   findById(transactionId: string): Promise<WagerTransaction | undefined>;
-  findByIdempotencyKey(idempotencyKey: string): Promise<WagerTransaction | undefined>;
+  /** The key is unique per provider (ADR-003): two providers may send the same one. */
+  findByIdempotencyKey(providerId: string, idempotencyKey: string): Promise<WagerTransaction | undefined>;
   findByProviderAndExternalId(providerId: string, externalTransactionId: string): Promise<WagerTransaction | undefined>;
   /** True when a PROCESSED REFUND or ROLLBACK already points to this transaction. */
   hasProcessedReversal(transactionId: string): Promise<boolean>;

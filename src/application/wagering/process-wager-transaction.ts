@@ -154,7 +154,7 @@ export class ProcessWagerTransaction {
     }
     // Same data means the same idempotency key, and the inbox row only commits together
     // with an operation stored under that key.
-    const operation = await repositories.transactions.findByIdempotencyKey(submitted.idempotencyKey);
+    const operation = await repositories.transactions.findByIdempotencyKey(submitted.providerId, submitted.idempotencyKey);
     if (operation === undefined) {
       throw new DomainInvariantError(`Inbox message ${inbox.messageId} has no operation ${submitted.idempotencyKey}`);
     }
@@ -169,7 +169,7 @@ export class ProcessWagerTransaction {
     repositories: Repositories,
     submitted: WagerTransaction,
   ): Promise<WagerResultView> {
-    const sameKey = await repositories.transactions.findByIdempotencyKey(submitted.idempotencyKey);
+    const sameKey = await repositories.transactions.findByIdempotencyKey(submitted.providerId, submitted.idempotencyKey);
     if (sameKey !== undefined) {
       if (submitted.payloadHash !== undefined && sameKey.matchesPayload(submitted.payloadHash)) {
         return toWagerResultView(sameKey, true);

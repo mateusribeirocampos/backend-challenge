@@ -65,8 +65,8 @@ function harness(stored: { inbox?: InboxMessage; operation?: WagerTransaction })
       saveProcessed: unexpected('inbox.saveProcessed'),
     },
     transactions: {
-      findByIdempotencyKey: async (key: string) => {
-        calls.push(`transactions.findByIdempotencyKey(${key})`);
+      findByIdempotencyKey: async (providerId: string, key: string) => {
+        calls.push(`transactions.findByIdempotencyKey(${providerId}, ${key})`);
         return stored.operation;
       },
       insertIfAbsent: unexpected('transactions.insertIfAbsent'),
@@ -108,7 +108,7 @@ describe('ProcessWagerTransaction.executeDelivery: a message the inbox already h
         idempotentReplay: true,
       },
     });
-    expect(calls).toEqual(['inbox.insertIfAbsent', 'inbox.find', 'transactions.findByIdempotencyKey(provider-a:b1)']);
+    expect(calls).toEqual(['inbox.insertIfAbsent', 'inbox.find', 'transactions.findByIdempotencyKey(provider-a, provider-a:b1)']);
   });
 
   test('same messageId, different data: MessageIdConflictError, and the operation is never looked at', async () => {
