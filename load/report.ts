@@ -45,7 +45,10 @@ function environmentSection(environment: Environment): string {
           `${environment.sqsEmulator} (docker compose, sem limite de CPU). \`SendMessage\` FIFO com ${probe.senders} remetentes: ${decimal(probe.firstPerSecond)}/s nas primeiras ${integer(probe.firstMessages)} mensagens, ${decimal(probe.laterPerSecond)}/s depois de ${integer(probe.laterAfterMessages)}`,
         ],
         ['Instâncias da aplicação', `${environment.appInstances} processos \`src/main.ts\`, cada um com HTTP, consumer SQS, publisher da outbox e worker de PENDING_REFERENCE`],
-        ['Pool de conexões', `${environment.poolSizePerInstance} por instância (padrão do pg-pool), ${environment.poolSizePerInstance * environment.appInstances} no total`],
+        [
+          'Pool de conexões',
+          `${environment.poolSizePerInstance} por instância para HTTP e consumer (${environment.poolSizePerInstance * environment.appInstances} no total) e ${environment.backgroundPoolSizePerInstance} para publisher e worker; espera máxima por conexão de ${integer(environment.poolAcquireTimeoutMs)} ms`,
+        ],
         ['`lock_timeout`', environment.lockTimeout],
         [
           'Consumer SQS',

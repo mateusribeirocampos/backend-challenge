@@ -63,6 +63,8 @@ function run(scenarios: ScenarioResult[]): LoadRunResult {
       sqsSendProbe: { senders: 8, firstMessages: 1000, firstPerSecond: 1170, laterAfterMessages: 6000, laterPerSecond: 500 },
       appInstances: 3,
       poolSizePerInstance: 10,
+      backgroundPoolSizePerInstance: 3,
+      poolAcquireTimeoutMs: 2000,
       lockTimeout: '2s',
       consumer: { visibilityTimeoutSeconds: 30, waitTimeSeconds: 10, maxMessages: 10 },
       publisher: { leaseSeconds: 30, batchSize: 20, pollIntervalMs: 500 },
@@ -98,7 +100,9 @@ describe('renderReport', () => {
 
     expect(report).toContain('CPU de teste, 16 núcleos lógicos');
     expect(report).toContain('| Bun | 1.4.2 |');
-    expect(report).toContain('10 por instância (padrão do pg-pool), 30 no total');
+    expect(report).toContain(
+      '10 por instância para HTTP e consumer (30 no total) e 3 para publisher e worker; espera máxima por conexão de 2.000 ms',
+    );
     expect(report).toContain('| `lock_timeout` | 2s |');
     expect(report).toContain('1.170,0/s nas primeiras 1.000 mensagens, 500,0/s depois de 6.000');
     expect(report).toContain('passos de 1, 8, 64 clientes, 6 s medidos por passo');
@@ -154,6 +158,9 @@ describe('renderReport', () => {
     expect(report).toContain('Nenhum `503` e nenhum conflito de lock na hot wallet');
     // 30 connections x (1000 / 200 = 5 ms) = 150 ms
     expect(report).toContain('cerca de 30 × 5,00 = 150,0 ms');
+    // The pool wait is bounded since the pool fix: the report must not say otherwise.
+    expect(report).toContain('esperam uma conexão livre dentro da instância por até 2.000 ms');
+    expect(report).not.toContain('não tem prazo de espera');
   });
 
   test('503 in the hot wallet: reports the count instead of the pool explanation', () => {
@@ -194,6 +201,17 @@ describe('renderReport', () => {
     expect(renderReport(run([scenario('hot-wallet', slow)]))).toContain(
       'O máximo medido com 64 clientes, 2.595,4 ms, passou do `lock_timeout` sem nenhum `503`',
     );
+  });
+
+  test('hot wallet publishing collapses: the report does not blame the shared pool, the publisher has its own', () => {
+    const steps = hotSteps(168.3).map((each, index) =>
+      step({ ...each, outbox: { ...each.outbox, publishedPerSecond: index === 2 ? 4.3 : 280 } }),
+    );
+    const report = renderReport(run([scenario('hot-wallet', steps)]));
+
+    expect(report).toContain('a publicação caiu para 4,3/s');
+    expect(report).toContain('O publisher usa um pool próprio (3 conexões por instância)');
+    expect(report).not.toContain('mesmo pool');
   });
 
   test('publishing slower than the emulator alone: the report does not blame the emulator for all of it', () => {

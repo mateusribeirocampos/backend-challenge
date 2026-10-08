@@ -252,7 +252,7 @@ function contentionParagraph(result: LoadRunResult): string {
       : '';
   const explanation =
     unavailable === 0 && conflicts === 0
-      ? `Nenhum \`503\` e nenhum conflito de lock na hot wallet, mesmo com ${clientsOf(high)} clientes. O motivo é o pool: no máximo ${poolTotal} transações (${environment.appInstances} instâncias × ${environment.poolSizePerInstance} conexões) esperam o lock ao mesmo tempo. Com ${decimal(lockMs, 2)} ms por transação, a última da fila espera cerca de ${poolTotal} × ${decimal(lockMs, 2)} = ${decimal(poolTotal * lockMs)} ms, abaixo do \`lock_timeout\` de ${environment.lockTimeout}. As demais requisições esperam uma conexão dentro da instância, no pool, que não tem prazo de espera (o projeto não define \`connectionTimeoutMillis\` do pg-pool): com sobrecarga maior a latência continuaria crescendo em vez de virar \`503\`.${pastTimeout} Um prazo de espera no pool seria o ajuste para falhar rápido.`
+      ? `Nenhum \`503\` e nenhum conflito de lock na hot wallet, mesmo com ${clientsOf(high)} clientes. O motivo é o pool: no máximo ${poolTotal} transações (${environment.appInstances} instâncias × ${environment.poolSizePerInstance} conexões) esperam o lock ao mesmo tempo. Com ${decimal(lockMs, 2)} ms por transação, a última da fila espera cerca de ${poolTotal} × ${decimal(lockMs, 2)} = ${decimal(poolTotal * lockMs)} ms, abaixo do \`lock_timeout\` de ${environment.lockTimeout}. As demais requisições esperam uma conexão livre dentro da instância por até ${integer(environment.poolAcquireTimeoutMs)} ms; depois disso recebem \`503\` com \`Retry-After\`.${pastTimeout}`
       : `Na hot wallet houve ${integer(unavailable)} respostas \`503\` e ${integer(conflicts)} conflitos de lock contados no \`/metrics\`. O cliente reenviou cada uma com a mesma \`Idempotency-Key\` depois do \`Retry-After\`; as verificações de correção do cenário mostram se algum reenvio duplicou efeito.`;
   return ['### Conflitos de concorrência e o `lock_timeout`', '', explanation, ''].join('\n');
 }
@@ -278,7 +278,7 @@ function outboxParagraph(result: LoadRunResult): string {
           : `A publicação não acompanhou: o atraso cresceu durante a janela (p99 de ${seconds(distinctHigh.outbox.eventLagMs?.p99)} s, máximo de ${seconds(distinctHigh.outbox.eventLagMs?.max)} s) e os publishers levaram ${seconds(distinctHigh.outbox.drainMs)} s depois do fim da carga para zerar a fila.`
       }${
         distinctHigh.outbox.publishedPerSecond < probe.laterPerSecond
-          ? ' A vazão de publicação ficou abaixo até do que o emulador aceitou sozinho depois de algumas mil mensagens, então o emulador não explica tudo. Somam-se: o custo por envio do emulador, que cresce durante o passo (a fila de eventos recebe milhares de mensagens); a transação que marca cada evento, que espera conexão no mesmo pool das requisições HTTP; e o lote, que só termina quando a wallet com mais eventos termina. Este teste não separa quanto vem de cada parte.'
+          ? ' A vazão de publicação ficou abaixo até do que o emulador aceitou sozinho depois de algumas mil mensagens, então o emulador não explica tudo. Somam-se: o custo por envio do emulador, que cresce durante o passo (a fila de eventos recebe milhares de mensagens); a transação que marca cada evento; e o lote, que só termina quando a wallet com mais eventos termina. Este teste não separa quanto vem de cada parte.'
           : ''
       }`,
     );
@@ -289,7 +289,7 @@ function outboxParagraph(result: LoadRunResult): string {
       '',
       `Na hot wallet todos os eventos são da mesma wallet e saem em série: com ${hotLow.label}, ${decimal(hotLow.outbox.publishedPerSecond)} publicados/s contra ${decimal(hotLow.outbox.writtenPerSecond)} gravados/s. ${
         starved
-          ? `Com ${hotHigh.label} a publicação caiu para ${decimal(hotHigh.outbox.publishedPerSecond)}/s, com o MiniStack em ${decimal(hotHigh.cpuCores?.sqsEmulator, 2)} núcleo e as instâncias quase paradas. O mais provável é falta de conexão: o publisher usa o mesmo pool (${result.environment.poolSizePerInstance} por instância) das requisições HTTP, essas conexões ficam presas esperando o lock da wallet, e o publisher espera na fila do pool atrás delas. Um pool separado para os loops de fundo evitaria isso.`
+          ? `Com ${hotHigh.label} a publicação caiu para ${decimal(hotHigh.outbox.publishedPerSecond)}/s, com o MiniStack em ${decimal(hotHigh.cpuCores?.sqsEmulator, 2)} núcleo e as instâncias quase paradas. O publisher usa um pool próprio (${result.environment.backgroundPoolSizePerInstance} conexões por instância), separado das requisições presas no lock da wallet; a causa desta queda não foi isolada neste teste.`
           : `Com ${hotHigh.label}, ${decimal(hotHigh.outbox.publishedPerSecond)} publicados/s.`
       }`,
     );

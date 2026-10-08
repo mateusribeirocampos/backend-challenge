@@ -7,8 +7,6 @@ import { query } from './database.js';
 import type { SendProbe } from './emulator-probe.js';
 import type { Environment } from './results.js';
 
-/** pg-pool's default size: the project does not set `pool` in the MikroORM config. */
-const PG_POOL_DEFAULT_MAX = 10;
 /** MaxNumberOfMessages of the consumer (src/wager-consumer.module.ts). */
 const CONSUMER_MAX_MESSAGES = 10;
 
@@ -32,7 +30,9 @@ export async function collectEnvironment(
     sqsEmulator: await sqsEmulatorVersion(app.sqs.endpoint),
     sqsSendProbe,
     appInstances: instances,
-    poolSizePerInstance: PG_POOL_DEFAULT_MAX,
+    poolSizePerInstance: app.database.poolSize,
+    backgroundPoolSizePerInstance: app.database.backgroundPoolSize,
+    poolAcquireTimeoutMs: app.database.acquireTimeoutMs,
     lockTimeout: LOCK_TIMEOUT,
     consumer: {
       visibilityTimeoutSeconds: app.sqs.consumer.visibilityTimeoutSeconds,
