@@ -9,6 +9,7 @@ import {
   type EventsQueue,
 } from '../test/integration/messaging/support/outbox-events.js';
 import { createTestQueues, deleteTestQueues, type TestQueues } from '../test/integration/messaging/support/sqs-test-queues.js';
+import { assertDisposableLoadDatabase } from './settings.js';
 
 /**
  * The system under test: a database and queues of its own for this run, and N copies of
@@ -36,6 +37,7 @@ export interface Instance {
  * only see this run's rows.
  */
 export async function prepareDatabase(app: AppConfig, databaseName: string): Promise<MikroORM> {
+  assertDisposableLoadDatabase(databaseName, app.database.dbName);
   const admin = await MikroORM.init({ ...buildMikroOrmConfig(app.database), debug: false });
   try {
     const connection = admin.em.getConnection();
