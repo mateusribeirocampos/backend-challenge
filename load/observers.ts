@@ -18,29 +18,55 @@ export async function scrapeAll(instances: readonly Instance[]): Promise<PromSam
 }
 
 /**
+ * Runs one sample at a time: a tick that finds the previous one still running is skipped,
+ * so stop() waits for the only sample in flight and nothing is added after it returns.
+ */
+class SerialTicker {
+  private timer: ReturnType<typeof setInterval> | undefined;
+  private inFlight: Promise<void> | undefined;
+
+  constructor(
+    private readonly work: () => Promise<void>,
+    private readonly intervalMs: number,
+  ) {}
+
+  start(): void {
+    this.timer = setInterval(() => {
+      if (this.inFlight !== undefined) return;
+      this.inFlight = this.work().finally(() => {
+        this.inFlight = undefined;
+      });
+    }, this.intervalMs);
+  }
+
+  async stop(): Promise<void> {
+    clearInterval(this.timer);
+    await this.inFlight;
+  }
+}
+
+/**
  * Reads wager_outbox_lag_seconds every interval. Each publisher sets it after each batch
  * to the age of the oldest unpublished event; the largest value among the instances is
  * the freshest view of the backlog.
  */
 export class OutboxLagSampler {
   private readonly samples: number[] = [];
-  private timer: ReturnType<typeof setInterval> | undefined;
-  private inFlight: Promise<void> = Promise.resolve();
+  private readonly ticker: SerialTicker;
 
   constructor(
     private readonly instances: readonly Instance[],
-    private readonly intervalMs = 500,
-  ) {}
+    intervalMs = 500,
+  ) {
+    this.ticker = new SerialTicker(() => this.sample(), intervalMs);
+  }
 
   start(): void {
-    this.timer = setInterval(() => {
-      this.inFlight = this.sample();
-    }, this.intervalMs);
+    this.ticker.start();
   }
 
   async stop(): Promise<number[]> {
-    clearInterval(this.timer);
-    await this.inFlight;
+    await this.ticker.stop();
     return [...this.samples];
   }
 
@@ -146,23 +172,21 @@ export interface WaitShare {
 export class PostgresWaitSampler {
   private readonly counts = new Map<string, number>();
   private total = 0;
-  private timer: ReturnType<typeof setInterval> | undefined;
-  private inFlight: Promise<void> = Promise.resolve();
+  private readonly ticker: SerialTicker;
 
   constructor(
     private readonly orm: MikroORM,
-    private readonly intervalMs = 250,
-  ) {}
+    intervalMs = 250,
+  ) {
+    this.ticker = new SerialTicker(() => this.sample(), intervalMs);
+  }
 
   start(): void {
-    this.timer = setInterval(() => {
-      this.inFlight = this.sample();
-    }, this.intervalMs);
+    this.ticker.start();
   }
 
   async stop(): Promise<WaitShare[]> {
-    clearInterval(this.timer);
-    await this.inFlight;
+    await this.ticker.stop();
     return [...this.counts]
       .map(([wait, count]) => ({ wait, share: count / Math.max(1, this.total) }))
       .sort((left, right) => right.share - left.share);
