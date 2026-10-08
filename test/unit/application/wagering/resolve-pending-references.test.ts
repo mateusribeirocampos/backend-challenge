@@ -251,7 +251,8 @@ describe('ResolvePendingReferences', () => {
     const result = await worker.resolveBatch();
 
     expect(result).toEqual({ checked: 1, resolved: 0, stillWaiting: 1, expired: 0, failed: 1 });
-    expect(database.skipRequests).toEqual([[], [stuck.id], [stuck.id]]);
+    // The checked row is skipped too: each row at most once per batch.
+    expect(database.skipRequests).toEqual([[], [stuck.id], [stuck.id, fine.id]]);
     expect(logs.events('pending_reference.check_failed')[0]?.fields).toEqual(
       // Class and SQLSTATE only: the message of a database error may carry SQL parameters (spec 12).
       expect.objectContaining({ transactionId: stuck.id, correlationId: stuck.id, errorClass: 'Error', errorCode: '55P03' }),
@@ -268,7 +269,7 @@ describe('ResolvePendingReferences', () => {
     const result = await worker.resolveBatch();
 
     expect(result).toEqual({ checked: 1, resolved: 0, stillWaiting: 1, expired: 0, failed: 1 });
-    expect(database.skipRequests).toEqual([[], [broken.id], [broken.id]]);
+    expect(database.skipRequests).toEqual([[], [broken.id], [broken.id, fine.id]]);
     expect(logs.events('pending_reference.check_failed')[0]?.fields).toEqual(
       expect.objectContaining({ transactionId: broken.id, errorClass: 'Error', errorCode: 'P0001' }),
     );

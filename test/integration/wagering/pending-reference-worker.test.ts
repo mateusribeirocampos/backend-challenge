@@ -267,6 +267,20 @@ describe('PENDING_REFERENCE worker', () => {
     await expectBalanceMatchesLedger(orm, app.baseUrl, otherWallet.id, '100.00');
   });
 
+  test('one batch checks a row at most once, even when its next check comes due while the batch is still running', async () => {
+    // 1 ms between checks: on any machine the row is due again before the batch asks for the next one.
+    const app = await start(workerConfig({ enabled: false, baseDelayMs: 1, maxDelayMs: 1 }));
+    const wallet = await openWallet(app.baseUrl, '100.00');
+    const { reversal } = betAndReversal(wallet, 'REFUND');
+    expect((await submit(app.baseUrl, reversal)).status).toBe(202); // its BET never arrives here
+    await scheduleCheck(orm, reversal.externalTransactionId, 'due');
+
+    const batch = await app.get(ResolvePendingReferences).resolveBatch();
+
+    expect(batch).toEqual(expect.objectContaining({ checked: 1, stillWaiting: 1 }));
+    expect((await referenceWaitOf(orm, reversal.externalTransactionId))?.reference_attempts).toBe(1);
+  });
+
   test('chain: a ROLLBACK waits for a REFUND that waits for a late BET; past its last check the ROLLBACK keeps waiting and is then processed', async () => {
     const app = await start(workerConfig({ enabled: false, maxAttempts: 2 })); // worker driven by the test
     const worker = app.get(ResolvePendingReferences);

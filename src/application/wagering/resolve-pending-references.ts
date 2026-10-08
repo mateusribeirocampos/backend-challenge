@@ -75,26 +75,30 @@ export class ResolvePendingReferences {
 
   /**
    * Checks up to batchSize due transactions. shouldStop: checked before each one.
-   * A row whose check fails (a lock timeout on a busy wallet, a bug) is skipped for the
-   * rest of the batch; otherwise, being the most overdue, it would be picked again and
-   * again and block every row behind it.
+   * Each row is checked at most once per batch:
+   *   - a row whose check fails (a lock timeout on a busy wallet, a bug) is skipped for
+   *     the rest of the batch; otherwise, being the most overdue, it would be picked
+   *     again and again and block every row behind it;
+   *   - a row checked and still waiting is skipped too: with a short delay its next check
+   *     can come due before the batch ends, and the batch would spend itself on it.
    */
   async resolveBatch(shouldStop: () => boolean = () => false): Promise<PendingReferenceBatchResult> {
     const result = { checked: 0, resolved: 0, stillWaiting: 0, expired: 0, failed: 0 };
-    const failedIds: string[] = [];
+    const visitedIds: string[] = [];
     while (result.checked + result.failed < this.settings.batchSize && !shouldStop()) {
       try {
-        const outcome = await this.checkNext(failedIds);
-        if (outcome === undefined) {
+        const checked = await this.checkNext(visitedIds);
+        if (checked === undefined) {
           break; // nothing (else) is due
         }
+        visitedIds.push(checked.transactionId);
         result.checked += 1;
-        result[outcome] += 1;
+        result[checked.outcome] += 1;
       } catch (error) {
         if (!(error instanceof CheckFailedError)) {
           throw error;
         }
-        failedIds.push(error.transactionId);
+        visitedIds.push(error.transactionId);
         result.failed += 1;
         this.logger.error('pending_reference.check_failed', {
           transactionId: error.transactionId,
@@ -114,12 +118,14 @@ export class ResolvePendingReferences {
    * callback or from the COMMIT itself (a deferred constraint trigger), and either way the
    * batch must know which row to skip.
    */
-  private async checkNext(failedIds: readonly string[]): Promise<CheckResult | undefined> {
+  private async checkNext(
+    skipIds: readonly string[],
+  ): Promise<{ transactionId: string; outcome: CheckResult } | undefined> {
     let picked: WagerTransaction | undefined;
     let checked: { transaction: WagerTransaction; attempt: number } | undefined;
     try {
       checked = await this.runner.run((repositories) =>
-        this.check(repositories, failedIds, (transaction) => {
+        this.check(repositories, skipIds, (transaction) => {
           picked = transaction;
         }),
       );
@@ -131,15 +137,18 @@ export class ResolvePendingReferences {
       throw new CheckFailedError(picked.id, picked.walletId, error);
     }
     // After the commit: metrics and logs describe what is really stored.
-    return checked === undefined ? undefined : this.report(checked.transaction, checked.attempt);
+    if (checked === undefined) {
+      return undefined;
+    }
+    return { transactionId: checked.transaction.id, outcome: this.report(checked.transaction, checked.attempt) };
   }
 
   private async check(
     repositories: Repositories,
-    failedIds: readonly string[],
+    skipIds: readonly string[],
     onPicked: (transaction: WagerTransaction) => void,
   ): Promise<{ transaction: WagerTransaction; attempt: number } | undefined> {
-    const due = await repositories.transactions.lockNextDuePendingReference(this.clock.now(), failedIds);
+    const due = await repositories.transactions.lockNextDuePendingReference(this.clock.now(), skipIds);
     if (due === undefined) {
       return undefined;
     }
