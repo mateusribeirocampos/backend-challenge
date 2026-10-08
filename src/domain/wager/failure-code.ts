@@ -2,7 +2,7 @@
  * Stable, machine readable reasons stored in wager_transactions.failure_code.
  * The text of a code never changes once released: providers branch on it.
  * Each one answers "should the provider resend, fix the payload or give up?".
- * Full table with the provider action: vault note "Taxonomia de failureCode".
+ * The provider action for each code is in ARCHITECTURE.md, section 6.
  */
 export const FailureCode = {
   // ---- REJECTED: business rule, terminal. Resending the same payload gives the same answer.
@@ -35,7 +35,8 @@ export const FailureCode = {
   /** PENDING_REFERENCE gave up (ADR-008 part B, worker): the reference never arrived within the wait. */
   ReferenceNotFound: 'REFERENCE_NOT_FOUND',
 
-  // ---- FAILED: permanent infrastructure error, terminal, kept for audit (Slice 3 on).
+  // ---- FAILED: reserved. No transaction is written as FAILED (ARCHITECTURE.md, section 7):
+  // a permanent error rolls everything back and the DLQ keeps the message and the reason.
   PermanentInfrastructureError: 'PERMANENT_INFRASTRUCTURE_ERROR',
 } as const;
 export type FailureCode = (typeof FailureCode)[keyof typeof FailureCode];
