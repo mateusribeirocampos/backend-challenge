@@ -30,7 +30,7 @@ export const DEFAULT_RETRY_POLICY: RetryPolicy = {
 type Mutable<T> = { -readonly [K in keyof T]: T[K] };
 
 /**
- * An integration event waiting to be published (spec 6.5, ADR-005). It is written in
+ * An integration event waiting to be published (spec 6.5). It is written in
  * the same SQL transaction as the change that produced the event, and a worker
  * publishes it after the commit. Publishing twice is possible (at-least-once); the
  * consumer deduplicates by id.

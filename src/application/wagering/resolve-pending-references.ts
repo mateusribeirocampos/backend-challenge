@@ -47,7 +47,7 @@ class CheckFailedError extends Error {
 }
 
 /**
- * The PENDING_REFERENCE worker (spec 7.1, ADR-008 part B). A REFUND or ROLLBACK that
+ * The PENDING_REFERENCE worker (spec 7.1). A REFUND or ROLLBACK that
  * arrived before its BET was stored as PENDING_REFERENCE with a next check time. Each
  * check, in its own SQL transaction:
  *

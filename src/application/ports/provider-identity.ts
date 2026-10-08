@@ -1,5 +1,5 @@
 /**
- * Authentication extension point (spec 2, ADR-006). Today the adapter is a no-op and
+ * Authentication extension point (spec 2). Today the adapter is a no-op and
  * every caller is anonymous. A real adapter would validate an OAuth2 client
  * credentials token against the IdP's JWKS and return the providerId it carries; the
  * guard would then refuse a body whose providerId differs. No use case changes.

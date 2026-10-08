@@ -5,7 +5,7 @@ import { violation } from './request-validation.js';
 
 /**
  * { "amount": "25.00", "currency": "BRL" }. The rules live in one place, Money.from
- * (ADR-004): this schema only calls it, so the API and the domain can never disagree
+ *: this schema only calls it, so the API and the domain can never disagree
  * about what a valid amount is. A JSON number for amount is refused, not converted.
  */
 export const moneySchema = z

@@ -28,11 +28,11 @@ export const FailureCode = {
   /** Reference ended REJECTED or FAILED: there is nothing to settle or revert. */
   ReferenceNotProcessed: 'REFERENCE_NOT_PROCESSED',
   /**
-   * Reference already has a PROCESSED reversal, of any kind (ADR-008). Applies to a second
+   * Reference already has a PROCESSED reversal, of any kind. Applies to a second
    * REFUND/ROLLBACK and also to a WIN/LOSS that tries to settle a reversed BET.
    */
   ReferenceAlreadyReversed: 'REFERENCE_ALREADY_REVERSED',
-  /** PENDING_REFERENCE gave up (ADR-008 part B, worker): the reference never arrived within the wait. */
+  /** PENDING_REFERENCE gave up (worker): the reference never arrived within the wait. */
   ReferenceNotFound: 'REFERENCE_NOT_FOUND',
 
   // ---- FAILED: reserved. No transaction is written as FAILED (ARCHITECTURE.md, section 7):

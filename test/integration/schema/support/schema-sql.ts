@@ -214,7 +214,7 @@ export async function openWalletWithBalance(
 }
 
 /**
- * Statements for one processed movement, the way Slice 2 will write it:
+ * Statements for one processed movement, the way the use case writes it:
  * transaction row, ledger entry and wallet update.
  */
 export function movementStatements(

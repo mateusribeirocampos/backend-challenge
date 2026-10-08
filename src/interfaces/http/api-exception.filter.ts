@@ -19,7 +19,7 @@ import { correlationIdOf } from './correlation-id.middleware.js';
 import type { HttpRequest, HttpResponse } from './http-types.js';
 import { RequestValidationError, type ValidationDetail } from './request-validation.js';
 
-/** The single error body of every endpoint (ADR-007). */
+/** The single error body of every endpoint. */
 export interface ErrorEnvelope {
   readonly errorCode: string;
   readonly message: string;

@@ -7,7 +7,7 @@ import {
 import type { HttpRequest } from './http-types.js';
 
 /**
- * Authentication extension point (spec 2, ADR-006). Registered on the wallet and
+ * Authentication extension point (spec 2). Registered on the wallet and
  * wagering controllers; health stays open. Today it lets every request through,
  * because the identity port is a no-op. With a real port it would:
  *   - answer 401 when resolve() fails (missing or invalid token);

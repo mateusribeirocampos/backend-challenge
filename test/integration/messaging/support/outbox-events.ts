@@ -57,7 +57,7 @@ export function publisherEnv(eventsQueueName: string, extra: Record<string, stri
 
 /**
  * The test database keeps the events of every earlier test, unpublished (nothing
- * published them before Slice 4). A publisher started by a test would send all of them;
+ * published them before a publisher ran). A publisher started by a test would send all of them;
  * marking them published first leaves only the test's own events to publish.
  */
 export async function markEveryPendingEventPublished(orm: MikroORM): Promise<void> {

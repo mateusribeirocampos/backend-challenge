@@ -46,7 +46,7 @@ export interface DeliveryResult {
 /**
  * Processes one provider operation. The same code serves POST /wagering/transactions
  * (execute) and the SQS consumer (executeDelivery). Everything below runs in ONE SQL
- * transaction (ADR-002, ADR-003, ADR-005):
+ * transaction:
  *
  *   0. SQS only: INSERT the inbox row ... ON CONFLICT DO NOTHING
  *        - not inserted -> this message was already processed: answer, change nothing;

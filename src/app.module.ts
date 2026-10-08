@@ -35,7 +35,7 @@ export class AppModule implements NestModule {
       ],
       controllers: [HealthController],
       providers: [
-        // One error envelope for every endpoint (ADR-007).
+        // One error envelope for every endpoint.
         { provide: APP_FILTER, useClass: ApiExceptionFilter },
         {
           provide: DEPENDENCY_CHECKS,

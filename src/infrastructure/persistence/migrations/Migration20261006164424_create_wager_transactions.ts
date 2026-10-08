@@ -2,7 +2,7 @@ import { Migration } from '@mikro-orm/migrations';
 
 /**
  * wager_transactions: every operation received from a provider, plus the internal
- * OPENING credit. It is also the persistent idempotency record (ADR-003): the
+ * OPENING credit. It is also the persistent idempotency record: the
  * original outcome (status, failure_code, result balance) is stored for replay.
  *
  * OPENING rows have no game context: provider_id is the reserved 'internal', and
@@ -44,7 +44,7 @@ export class Migration20261006164424_create_wager_transactions extends Migration
         constraint wager_transactions_reference_fk
           foreign key (reference_transaction_id) references wager_transactions (id),
 
-        -- idempotency (ADR-003): the same operation is stored once
+        -- idempotency: the same operation is stored once
         constraint wager_transactions_idempotency_key_unique unique (idempotency_key),
         constraint wager_transactions_provider_external_unique unique (provider_id, external_transaction_id),
 
@@ -80,7 +80,7 @@ export class Migration20261006164424_create_wager_transactions extends Migration
           check ((result_balance_amount is null) = (result_balance_currency is null)),
         constraint wager_transactions_result_balance_non_negative check (result_balance_amount >= 0),
 
-        -- PENDING_REFERENCE worker (ADR-008): a waiting row is always scheduled
+        -- PENDING_REFERENCE worker: a waiting row is always scheduled
         constraint wager_transactions_reference_attempts_non_negative check (reference_attempts >= 0),
         constraint wager_transactions_pending_reference_scheduled
           check (status <> 'PENDING_REFERENCE' or next_reference_check_at is not null),
@@ -95,7 +95,7 @@ export class Migration20261006164424_create_wager_transactions extends Migration
         constraint wager_transactions_opening_born_processed check (kind <> 'OPENING' or status = 'PROCESSED')
       )`);
 
-    // ADR-008: a transaction is reverted at most once, by REFUND or ROLLBACK, whichever
+    // A transaction is reverted at most once, by REFUND or ROLLBACK, whichever
     // comes first. Stricter than rule 4 (per kind), which would allow REFUND + ROLLBACK.
     this.addSql(`
       create unique index wager_transactions_single_reversal

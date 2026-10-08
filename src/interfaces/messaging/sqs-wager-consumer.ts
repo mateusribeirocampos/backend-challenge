@@ -26,7 +26,7 @@ export interface WagerConsumerSettings {
 }
 
 /**
- * Long polling consumer of wager-transactions.fifo (spec 10, ADR-005).
+ * Long polling consumer of wager-transactions.fifo (spec 10).
  *
  * One batch at a time: receive up to 10 messages, split them by MessageGroupId, run
  * the groups in parallel and the messages of one group one after the other, then

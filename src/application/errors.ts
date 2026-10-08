@@ -1,6 +1,6 @@
 /**
  * Errors of the application layer. Each one has a stable code: the HTTP layer maps
- * it to a status (ADR-007) and the SQS consumer maps it to ack, retry or DLQ.
+ * it to a status and the SQS consumer maps it to ack, retry or DLQ.
  * Business rejections are NOT errors: they are stored results (REJECTED + failureCode).
  */
 export abstract class ApplicationError extends Error {

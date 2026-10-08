@@ -18,9 +18,9 @@ import {
 } from './support/schema-sql.js';
 
 /**
- * ADR-002 regression: the lock mode on the wallet row must be FOR NO KEY UPDATE.
+ * Regression: the lock mode on the wallet row must be FOR NO KEY UPDATE.
  *
- * Slice 2 writes in this order, inside one transaction per request:
+ * The use case writes in this order, inside one transaction per request:
  *   1. INSERT the wager_transaction  (its FK to wallets takes FOR KEY SHARE on the wallet row)
  *   2. SELECT the wallet ... FOR <lock mode>
  *   3. UPDATE the balance, INSERT the ledger entry, UPDATE the transaction status

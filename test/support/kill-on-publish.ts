@@ -1,5 +1,5 @@
 /**
- * Test entrypoint (spec 11 scenario, ADR-005): the real app with the real outbox
+ * Test entrypoint (spec 11 scenario): the real app with the real outbox
  * publisher, except that the event publisher kills this process with SIGKILL:
  *   KILL_MOMENT=before-send: after the claim committed, before SendMessage;
  *   KILL_MOMENT=after-send:  after SendMessage, before the event is marked published.

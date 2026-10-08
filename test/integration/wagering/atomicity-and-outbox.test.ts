@@ -21,7 +21,7 @@ import {
  * SQL transaction. These tests read outbox_messages directly; nothing is published
  * yet (the publisher worker comes later).
  */
-describe('outbox written with the change (spec 11, ADR-005)', () => {
+describe('outbox written with the change (spec 11)', () => {
   let orm: MikroORM;
   let app: RunningTestApp;
 
@@ -176,7 +176,7 @@ describe('outbox written with the change (spec 11, ADR-005)', () => {
     expect(events[0]?.payload.data).toMatchObject({ kind: 'REFUND', referenceTransactionId: betResponse.body.transactionId });
     expect(events.map((event) => event.event_type)).toEqual(['WagerTransactionProcessed', 'WalletBalanceChanged']);
 
-    // A second reversal of the same BET is refused (ADR-008), resolved under the wallet lock.
+    // A second reversal of the same BET is refused, resolved under the wallet lock.
     const rollback = await submit(
       app.baseUrl,
       wager(wallet, {

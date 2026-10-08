@@ -3,7 +3,7 @@ import { Decimal } from 'decimal.js';
 /**
  * Private copy of the Decimal constructor with the configuration Money needs.
  * Decimal.clone() leaves the library's global configuration untouched, so no other
- * code that imports decimal.js can change how Money rounds (ADR-004).
+ * code that imports decimal.js can change how Money rounds.
  *
  * precision 40: significant digits kept by each operation, far above the 20 digits
  * of numeric(20,2), so add and subtract never lose a digit.

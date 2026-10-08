@@ -43,7 +43,7 @@ export class MikroOrmWalletRepository implements WalletRepository {
   }
 
   async lockById(walletId: string): Promise<Wallet | undefined> {
-    // FOR NO KEY UPDATE, not FOR UPDATE (ADR-002). The INSERT of the transaction
+    // FOR NO KEY UPDATE, not FOR UPDATE. The INSERT of the transaction
     // already holds FOR KEY SHARE on this row through the foreign key; FOR UPDATE
     // conflicts with KEY SHARE and two different BETs on the same wallet would
     // deadlock. MikroORM's LockMode.PESSIMISTIC_WRITE emits FOR UPDATE, hence raw SQL.

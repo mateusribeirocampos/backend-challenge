@@ -23,12 +23,12 @@ const kindField = z.string('is required').superRefine((kind, ctx) => {
 /**
  * Body of POST /wagering/transactions (spec 9). Shape and format only. The rules that
  * depend on several fields (REFUND needs a reference, BET cannot have one, amounts
- * per kind, the key namespace) are checked by WagerTransaction.create, so HTTP and
- * SQS apply exactly the same contract.
+ * per kind) are checked by WagerTransaction.create, so HTTP and SQS apply exactly the
+ * same contract.
  */
 export const submitWagerTransactionBody = z.object(
   {
-    // No ":" in providerId: it separates the provider namespace in the idempotency key.
+    // An identifier, not free text: it is part of the unique keys and of every log line.
     providerId: requiredText(64).regex(/^[A-Za-z0-9._-]+$/, 'letters, digits, ".", "_" or "-" only'),
     externalTransactionId: requiredText(),
     playerId: uuidField,

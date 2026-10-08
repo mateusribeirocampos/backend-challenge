@@ -37,7 +37,7 @@ const NOTHING: PublishBatchResult = { claimed: 0, published: 0, failed: 0, relea
 export const STALLED_AFTER_ATTEMPTS = 10;
 
 /**
- * The outbox publisher (spec 11, ADR-005). One batch, in three steps:
+ * The outbox publisher (spec 11). One batch, in three steps:
  *
  *   1. CLAIM, in a short SQL transaction: reserve due events with a lease (locked_until
  *      plus a token). FOR UPDATE SKIP LOCKED makes concurrent publishers take different
